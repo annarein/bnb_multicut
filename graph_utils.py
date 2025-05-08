@@ -15,7 +15,7 @@ def get_trivial_graph():
     pos = nx.spring_layout(graph, seed=42)
     return graph, costs, pos
 
-def get_random_costs_graph(seed=2, bias=0.3, shape=(5, 5)):
+def get_random_costs_graph(seed=2, bias=0.3, shape=(5, 6)):
     np.random.seed(seed)
     graph = nx.grid_graph(shape)
     costs = {}
@@ -26,16 +26,20 @@ def get_random_costs_graph(seed=2, bias=0.3, shape=(5, 5)):
     pos = {n: n for n in graph.nodes}
     return graph, costs, pos
 
+def get_test_zeros_graph(shape=(3, 3)):
+    graph = nx.grid_graph(shape)
+    costs = {(u, v): 0 for u, v in graph.edges()}
+    pos = {n: n for n in graph.nodes}
+    return graph, costs, pos
+
 def plot_multicut_result(graph: nx.Graph, costs: dict, pos, multicut: dict = None,
                          node_labeling: dict = None, title=None):
     plt.figure(figsize=(5, 5))
     edge_colors = ["green" if costs[(min(e), max(e))] > 0 else "red" for e in graph.edges]
     edge_widths = [1 + np.abs(costs[(min(e), max(e))]) for e in graph.edges]
     edge_styles = [":" if multicut and multicut.get((min(e), max(e)), 0) == 1 else "-" for e in graph.edges]
-
     node_colors = [int(node_labeling[n]) for n in graph.nodes] if node_labeling else "gray"
     cmap = plt.get_cmap("tab20") if node_labeling else None
-
     nx.draw(graph, pos, edge_color=edge_colors, width=edge_widths, style=edge_styles,
             node_color=node_colors, cmap=cmap)
 
