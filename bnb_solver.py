@@ -59,7 +59,7 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
         for j in range(i + 1, len(visited)):
             n1, n2 = visited[i], visited[j]
             edge = (min(n1, n2), max(n1, n2))
-            if cut_edges.get(edge, -1) == -1:
+            if edge in cut_edges and cut_edges[edge] == -1:
                 cut_edges[edge] = 0
                 newly_uncut.append(edge)
                 if log:
@@ -246,15 +246,14 @@ class BnBSolver:
         cut_edges = {e: -1 for e in normalized_costs}
         best = {'obj': 0, 'cut': cut_edges, 'count': 0}
         bnb_multicut(self.graph.copy(), normalized_costs, cut_edges, obj=0, best=best, log=self.log)
-        # obj = sum(self.costs[e] for e, v in best['cut'].items() if v == 1)
-        obj = sum(
-            normalized_costs[e]
-            for e, v in best['cut'].items() if v == 1
-        )
-        normalized_costs = {
-            (min(u, v), max(u, v)): w
-            for (u, v), w in self.costs.items()
-        }
+        # obj = sum(normalized_costs[e] for e, v in best['cut'].items() if v == 1)
+        print("Cut edges:")
+        obj = 0
+        for e, v in best['cut'].items():
+            if v == 1:
+                print(f"  {e} (cost={normalized_costs[e]:.4f})")
+                obj += normalized_costs[e]
+        print(f"Total cost = {obj:.4f}")
         # cut_edges = {e: -1 for e in self.costs}
         # best = {'obj': 0, 'cut': cut_edges, 'count': 0}
         # bnb_multicut(self.graph.copy(), self.costs, cut_edges, obj=0, best=best, log=self.log)
