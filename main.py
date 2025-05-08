@@ -34,7 +34,7 @@ def main():
     plot_multicut_result(graph, costs, pos, multicut_ilp, node_labeling_ilp, title="ILP Multicut Result")
 
     # === Branch and Bound Solver ===
-    solver_bnb = BnBSolver(graph.copy(), costs, log=False)
+    solver_bnb = BnBSolver(graph.copy(), costs, log=True)
     start_time = time.time()
     multicut_bnb, obj_bnb, count_bnb = solver_bnb.solve()
     elapsed_bnb = time.time() - start_time
