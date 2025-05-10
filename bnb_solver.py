@@ -1,5 +1,4 @@
 import copy
-
 import networkx as nx
 from collections import deque
 
@@ -11,10 +10,7 @@ def contract_and_merge_costs(graph: nx.Graph, costs: dict, u, v, cut_edges: dict
             continue
         key = (min(a_, b_), max(a_, b_))
         if cut_edges.get((min(a, b), max(a, b)), -1) == 1 or cut_edges.get(key, -1) == 1:
-            if log:
-                print(f"[Skip] merge ({u}, {v}) creates conflict: edge ({a}, {b}) or merged key {key} has cut label 1")
-            return None, None  # Conflict found: skip this merge
-
+            return None, None
     new_graph = nx.contracted_nodes(graph, u, v, self_loops=False)
     new_costs = {}
     for (a, b), w in costs.items():
@@ -27,21 +23,11 @@ def contract_and_merge_costs(graph: nx.Graph, costs: dict, u, v, cut_edges: dict
     return new_graph, new_costs
 
 def propagate_zero_labels(cut_edges, u, v, costs, log=False):
-    if log:
-        print(f"[PROP_ZERO] Start propagate_zero_labels from edge ({u}, {v})")
-        print("  - Current cut_edges:")
-        for edge, label in sorted(cut_edges.items()):
-            print(f"    {edge}: {label}")
-        print("  - Current costs:")
-        for edge, value in sorted(costs.items()):
-            print(f"    {edge}: {value:.2f}")
-
     graph = {}
     for (a, b), val in cut_edges.items():
         if val == 0:
             graph.setdefault(a, set()).add(b)
             graph.setdefault(b, set()).add(a)
-
     visited = set()
     queue = deque([u, v])
     while queue:
@@ -52,7 +38,6 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
         for neighbor in graph.get(node, []):
             if neighbor not in visited:
                 queue.append(neighbor)
-
     visited = list(visited)
     newly_uncut = []
     for i in range(len(visited)):
@@ -62,13 +47,8 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
             if edge in cut_edges and cut_edges[edge] == -1:
                 cut_edges[edge] = 0
                 newly_uncut.append(edge)
-                if log:
-                    found = "FOUND" if edge in costs else "NOT FOUND"
-                    value = costs.get(edge, 0)
-                    print(f"  Propagate 0-label: edge {edge} with cost {value:.2f} ({found})")
     total_added_cost = sum(costs[e] for e in newly_uncut if e in costs)
     return cut_edges, total_added_cost
-
 
 def is_feasible_cut(graph: nx.Graph, cut_edges: dict):
     g_copy = graph.copy()
@@ -84,58 +64,24 @@ def is_feasible_cut(graph: nx.Graph, cut_edges: dict):
             return False
     return True
 
-# def update_best_if_feasible(graph, cut_edges, obj, best):
-#     if is_feasible_cut(graph, cut_edges):
-#         if obj > best['obj']:
-#             best['obj'] = obj
-#             best['cut'] = copy.deepcopy(cut_edges)
-#             best['count'] = 1
-#         elif obj == best['obj']:
-#             best['count'] += 1
-
-def print_edge_labels_inline(graph, cut_edges, obj, best_obj):
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    RESET = "\033[0m"
-
-    print(f"[GRAPH STATUS] obj = {obj:.2f}, best = {best_obj:.2f}")
-    parts = []
-    for u, v in graph.edges():
-        e = (min(u, v), max(u, v))
-        label = cut_edges.get(e, -1)
-        if label == 1:
-            parts.append(f"{RED}{e}{RESET}")
-        elif label == 0:
-            parts.append(f"{GREEN}{e}{RESET}")
-        else:
-            parts.append(f"{e}")  # undecided = default color
-    print("  Edges: " + "  ".join(parts))
-
 def update_best_if_feasible(graph, cut_edges, obj, best):
     if is_feasible_cut(graph, cut_edges):
         if obj > best['obj']:
             best['obj'] = obj
-            best['cut'] = cut_edges
+            best['cut'] = copy.deepcopy(cut_edges)
             best['count'] = 1
-            print(f"[UPDATE] New best obj = {obj:.2f}")
-            print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
         elif obj == best['obj']:
             best['count'] += 1
-            print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
 
-def update_best_if_feasible_final (graph, cut_edges, obj, best):
+def update_best_if_feasible_final(graph, cut_edges, obj, best):
     if is_feasible_cut(graph, cut_edges):
         if obj > best['obj']:
             best['obj'] = obj
             best['cut'] = cut_edges
             best['count'] = 1
-            print(f"[UPDATE] New best obj = {obj:.2f}")
-            print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
         elif obj == best['obj']:
             best['cut'] = cut_edges
             best['count'] += 1
-            print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
-
 
 def heuristic_bound(graph, costs, cut_edges):
     g_copy = nx.Graph()
@@ -143,10 +89,8 @@ def heuristic_bound(graph, costs, cut_edges):
     for (u, v), val in cut_edges.items():
         if val == 0 and graph.has_edge(u, v):
             g_copy.add_edge(u, v)
-
     components = list(nx.connected_components(g_copy))
     node_labeling = {n: i for i, comp in enumerate(components) for n in comp}
-
     potential_gain = sum(
         w for (u, v), w in costs.items()
         if w > 0 and graph.has_edge(u, v)
@@ -156,81 +100,33 @@ def heuristic_bound(graph, costs, cut_edges):
     )
     return potential_gain
 
-def print_edge_label_groups(cut_edges: dict, tag: str = ""):
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    RESET = "\033[0m"
-
-    cut = {e for e, v in cut_edges.items() if v == 1}
-    uncut = {e for e, v in cut_edges.items() if v == 0}
-    undecided = {e for e, v in cut_edges.items() if v == -1}
-
-    print(f"[EDGE LABELS{f' @ {tag}' if tag else ''}]")
-    print(f"  cut edges:      {RED}{cut}{RESET}")
-    print(f"  uncut edges:    {GREEN}{uncut}{RESET}")
-    print(f"  undecided edges:{undecided}")
-
 def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=False):
     if not costs:
-        if log:
-            print(f"[NO COSTS] \033[92mcluster_obj={obj:.2f}\033[0m, best_obj={best['obj']:.2f}")
         cut_edges_copy = cut_edges.copy()
         for e in cut_edges_copy:
             if cut_edges_copy[e] == -1:
                 cut_edges_copy[e] = 1
         update_best_if_feasible_final(graph, cut_edges_copy, obj, best)
         return None
-
-    # Compute the optimistic bound (e.g., sum of remaining positive weights)
     bound = sum(w for w in costs.values() if w > 0)
-    # bound = heuristic_bound(graph, costs, cut_edges)
-
-    if log:
-        print(f"[ENTER BnB] \033[92mcluster_obj={obj:.2f}\033[0m, \033[91mbound={bound:.2f}\033[0m, best_obj={best['obj']:.2f}")
-
-    if is_feasible_cut(graph, cut_edges):
-        update_best_if_feasible(graph, cut_edges.copy(), obj, best)
-    elif obj >= best['obj'] and log:
-        print(f"[Skipping infeasible cut] obj={obj:.2f}")
-
     if obj + bound < best['obj']:
-        if log:
-            print(f"[PRUNE] Max possible obj = {obj + bound:.2f} < best obj = {best['obj']:.2f} → prune branch")
         return None
-
     edge, max_cost = max(costs.items(), key=lambda item: item[1])
     u, v = edge
     edge_key = (min(u, v), max(u, v))
-
-    # Join branch
-    if log:
-        print_edge_label_groups(cut_edges, f"before JOIN ({u},{v})")
     graph_join, costs_join = contract_and_merge_costs(graph.copy(), costs, u, v, cut_edges, log=log)
     if graph_join is not None:
         cut_edges_join = cut_edges.copy()
         cut_edges_join[edge_key] = 0
         cut_edges_join, delta_obj = propagate_zero_labels(cut_edges_join, u, v, costs, log)
         obj_join = obj + max_cost + delta_obj
-        if log:
-            print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f} + delta_obj {delta_obj:.2f}")
-            print(f"  - New objective: {obj_join:.2f}")
         bnb_multicut(graph_join, costs_join, cut_edges_join, obj_join, best, log)
-        if log:
-            print_edge_label_groups(cut_edges_join, f"after JOIN ({u},{v})")
-
-    # Cut branch
-    if log:
-        print_edge_label_groups(cut_edges, f"before CUT ({u},{v})")
     graph_cut = graph.copy()
     graph_cut.remove_edge(u, v)
     costs_cut = {e: w for e, w in costs.items() if e != edge}
     cut_edges_cut = cut_edges.copy()
     cut_edges_cut[edge_key] = 1
-    if log:
-        print(f"[BRANCH] Cut: removing edge {edge_key} with cost {max_cost:.2f}, Objective unchanged: {obj:.2f}")
     bnb_multicut(graph_cut, costs_cut, cut_edges_cut, obj, best, log)
-    if log:
-        print_edge_label_groups(cut_edges_cut, f"after CUT ({u},{v})")
 
 class BnBSolver:
     def __init__(self, graph, costs, log=False):
@@ -246,21 +142,5 @@ class BnBSolver:
         cut_edges = {e: -1 for e in normalized_costs}
         best = {'obj': 0, 'cut': cut_edges, 'count': 0}
         bnb_multicut(self.graph.copy(), normalized_costs, cut_edges, obj=0, best=best, log=self.log)
-        # obj = sum(normalized_costs[e] for e, v in best['cut'].items() if v == 1)
-        print("Cut edges:")
         obj = 0
-        for e, v in best['cut'].items():
-            if v == 1:
-                print(f"  {e} (cost={normalized_costs[e]:.4f})")
-                obj += normalized_costs[e]
-        print(f"Total cost = {obj:.4f}")
-        # cut_edges = {e: -1 for e in self.costs}
-        # best = {'obj': 0, 'cut': cut_edges, 'count': 0}
-        # bnb_multicut(self.graph.copy(), self.costs, cut_edges, obj=0, best=best, log=self.log)
-        # # obj = sum(self.costs[e] for e, v in best['cut'].items() if v == 1)
-        # obj = sum(
-        #     self.costs[e]
-        #     for e, v in best['cut'].items() if v == 1
-        # )
-        print("[DEBUG] Final raw best cut:", best['cut'])
         return best['cut'], obj, best['count']
