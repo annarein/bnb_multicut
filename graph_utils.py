@@ -15,7 +15,7 @@ def get_trivial_graph():
     pos = nx.spring_layout(graph, seed=42)
     return graph, costs, pos
 
-def get_random_costs_graph(seed=2, bias=0.3, shape=(1, 3)):
+def get_random_costs_graph(seed=2, bias=0.3, shape=(5, 8)):
     np.random.seed(seed)
     graph = nx.grid_graph(shape)
     costs = {}
