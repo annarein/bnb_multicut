@@ -3,17 +3,34 @@ from collections import deque
 
 
 def contract_and_merge_costs(graph: nx.Graph, costs: dict, u, v, cut_edges: dict, log=False):
+    """
+    Attempts to merge node v into node u, while checking for cut conflicts.
+
+    Phase 1: Check if the merge would introduce conflicts.
+    If any existing or resulting edge is marked as "cut" (value 1), the merge is invalid.
+
+    Phase 2: If no conflict, perform the merge and construct a new cost dictionary.
+    If multiple edges collapse into the same key, their costs are summed.
+
+    Returns:
+        - new_graph: the contracted graph (with v merged into u)
+        - new_costs: updated cost dictionary after merging
+        - if conflict: returns (None, None)
+    """
+    # Phase 1: Conflict check before applying any changes
     for (a, b) in costs:
         a_ = u if a == v else a
         b_ = u if b == v else b
         if a_ == b_:
             continue
         key = (min(a_, b_), max(a_, b_))
+        # Check if either the original edge or the resulting edge is already marked as cut
         if cut_edges.get((min(a, b), max(a, b)), -1) == 1 or cut_edges.get(key, -1) == 1:  # 我在这里就避免了本来cut的边merge以后又 uncut（或者是undecided?)
             if log:
                 print(f"[Skip] merge ({u}, {v}) creates conflict: edge ({a}, {b}) or merged key {key} has cut label 1")
-            return None, None  # Conflict found: skip this merge
+            return None, None  # Skip merge due to logical inconsistency
 
+    # Phase 2: Safe to apply merge, proceed with contraction and cost rebuilding
     new_graph = nx.contracted_nodes(graph, u, v, self_loops=False)
     new_costs = {}
     for (a, b), w in costs.items():
@@ -22,11 +39,22 @@ def contract_and_merge_costs(graph: nx.Graph, costs: dict, u, v, cut_edges: dict
         if a_ == b_:
             continue
         key = (min(a_, b_), max(a_, b_))
-        new_costs[key] = new_costs.get(key, 0) + w  # 不知道为什么没有生成新的cost
+        new_costs[key] = new_costs.get(key, 0) + w  # 在这里会在 costs 中生成新的边：如果 key 不存在（也就是这是第一次添加这个边），就返回默认值 0；如果合并过程中有多个边变成了同一个边（如平行边），就把它们的成本加在一起。
+        print(f"→ Merged edge: {key}, cost = {w}, updated = {new_costs.get(key, 0) + w}")
     return new_graph, new_costs
 
 
 def propagate_zero_labels(cut_edges, u, v, costs, log=False):
+    """
+    Propagates 0-labels (uncut) within the same connected component starting from (u, v).
+
+    Any undecided edge (value -1) between any two nodes in the same 0-connected component
+    will be set to 0, and its cost will be included in the returned delta objective.
+
+    Returns:
+        updated cut_edges dict,
+        total cost added from newly labeled 0-edges.
+    """
     if log:
         print(f"[PROP_ZERO] Start propagate_zero_labels from edge ({u}, {v})")
         print("  - Current cut_edges:")
@@ -63,7 +91,7 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
                 cut_edges[edge] = 0
                 newly_uncut.append(edge)
                 if log:
-                    found = "FOUND" if edge in costs else "NOT FOUND"
+                    found = "FOUND" if edge in costs else "NOT FOUND" # only have NOT FOUND result, maybe it's not necessary?
                     value = costs.get(edge, 0)
                     print(f"  Propagate 0-label: edge {edge} with cost {value:.2f} ({found})")
     total_added_cost = sum(costs[e] for e in newly_uncut if e in costs)
