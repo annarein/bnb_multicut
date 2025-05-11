@@ -103,10 +103,10 @@ def print_edge_labels_inline(graph, cut_edges, obj, best_obj):
     parts = []
     for u, v in graph.edges():
         e = (min(u, v), max(u, v))
-        # label = cut_edges.get(e, -1)
-        if e not in cut_edges:
-            raise ValueError(f"Edge {e} not found in cut_edges!")
-        label = cut_edges[e]
+        label = cut_edges.get(e, -1)
+        # if e not in cut_edges:
+        #     raise ValueError(f"Edge {e} not found in cut_edges!")
+        # label = cut_edges[e]
         if label == 1:
             parts.append(f"{RED}{e}{RESET}")
         elif label == 0:
@@ -215,7 +215,12 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
     # Join branch
     if log:
         print_edge_label_groups(cut_edges, f"before JOIN ({u},{v})")
-    graph_join, costs_join = contract_and_merge_costs(graph.copy(), costs, u, v, cut_edges, log=log)
+    # ⬇️ Skip join if only one edge and max_cost <= 0
+    skip_join = (len(costs) == 1 and max_cost <= 0)
+    if skip_join:
+        graph_join = None
+    else:
+        graph_join, costs_join = contract_and_merge_costs(graph.copy(), costs, u, v, cut_edges, log=log)
     if graph_join is not None:
         cut_edges_join = cut_edges.copy()
         cut_edges_join[edge_key] = 0  # 所以就是这一步把 cut_edges 多出原来graph不存在的边的
