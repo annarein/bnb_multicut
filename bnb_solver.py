@@ -114,7 +114,11 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
     edge, max_cost = max(costs.items(), key=lambda item: item[1])
     u, v = edge
     edge_key = (min(u, v), max(u, v))
-    graph_join, costs_join = contract_and_merge_costs(graph.copy(), costs, u, v, cut_edges, log=log)
+    skip_join = (len(costs) == 1 and max_cost <= 0)
+    if skip_join:
+        graph_join = None
+    else:
+        graph_join, costs_join = contract_and_merge_costs(graph.copy(), costs, u, v, cut_edges, log=log)
     if graph_join is not None:
         cut_edges_join = cut_edges.copy()
         cut_edges_join[edge_key] = 0
