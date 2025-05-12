@@ -65,12 +65,14 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
         for edge, value in sorted(costs.items()):
             print(f"    {edge}: {value:.2f}")
 
+    # Step 1: Build adjacency map of all edges labeled as uncut (0)
     uncut_adj = {}
     for (a, b), val in cut_edges.items():
         if val == 0:
             uncut_adj.setdefault(a, set()).add(b)
             uncut_adj.setdefault(b, set()).add(a)
 
+    # Step 2: BFS to find all nodes reachable via uncut edges
     visited = set()
     queue = deque([u, v])
     while queue:
@@ -82,6 +84,7 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
             if neighbor not in visited:
                 queue.append(neighbor)
 
+    # Step 3: For each pair of visited nodes, propagate 0-label if edge was undecided
     visited = list(visited)
     newly_uncut = []
     for i in range(len(visited)):
@@ -94,7 +97,7 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
                 if log:
                     found = "FOUND" if edge in costs else "NOT FOUND" # only have NOT FOUND result, maybe it's not necessary?
                     value = costs.get(edge, 0)
-                    print(f"  Propagate 0-label: edge {edge} with cost {value:.2f} ({found})")
+                    print(f"\033[96m  Propagate 0-label: edge {edge} with cost {value:.2f} ({found})\033[0m")
     total_added_cost = sum(costs[e] for e in newly_uncut if e in costs)
     return cut_edges, total_added_cost
 
