@@ -64,14 +64,14 @@ def is_feasible_cut(graph: nx.Graph, cut_edges: dict):
             return False
     return True
 
-def update_best_if_feasible(graph, cut_edges, obj, best):
-    if is_feasible_cut(graph, cut_edges):
-        if obj > best['obj']:
-            best['obj'] = obj
-            best['cut'] = copy.deepcopy(cut_edges)
-            best['count'] = 1
-        elif obj == best['obj']:
-            best['count'] += 1
+# def update_best_if_feasible(graph, cut_edges, obj, best):
+#     if is_feasible_cut(graph, cut_edges):
+#         if obj > best['obj']:
+#             best['obj'] = obj
+#             best['cut'] = copy.deepcopy(cut_edges)
+#             best['count'] = 1
+#         elif obj == best['obj']:
+#             best['count'] += 1
 
 def update_best_if_feasible_final(graph, cut_edges, obj, best):
     if is_feasible_cut(graph, cut_edges):
@@ -147,4 +147,9 @@ class BnBSolver:
         best = {'obj': 0, 'cut': cut_edges, 'count': 0}
         bnb_multicut(self.graph.copy(), normalized_costs, cut_edges, obj=0, best=best, log=self.log)
         obj = 0
+        for u, v in self.graph.edges():
+            e = (min(u, v), max(u, v))
+            if best['cut'].get(e, -1) == 1:
+                cost = self.costs.get(e, 0)
+                obj += cost
         return best['cut'], obj, best['count']
