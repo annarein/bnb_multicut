@@ -101,20 +101,48 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
     total_added_cost = sum(costs[e] for e in newly_uncut if e in costs)
     return cut_edges, total_added_cost
 
+def is_feasible_cut(graph: nx.Graph, cut_edges: dict, verbose=False) -> bool:
+    # 1. 仅处理原始图中的边
+    edges_to_cut = []
+    for u, v in graph.edges:
+        if cut_edges.get((u, v), 0) == 1 or cut_edges.get((v, u), 0) == 1:
+            edges_to_cut.append((u, v))
 
-def is_feasible_cut(graph: nx.Graph, cut_edges: dict):  # is it necessary, will it produce infeasible when join or cut?
+    # 2. 拷贝图，删掉这些边
     g_copy = graph.copy()
-    g_copy.remove_edges_from([e for e, val in cut_edges.items() if val == 1])
-    components = nx.connected_components(g_copy)
-    node_labeling = {n: i for i, comp in enumerate(components) for n in comp}
-    for (u, v), val in cut_edges.items():
-        if val != 1:
-            continue
-        if u not in node_labeling or v not in node_labeling:
-            continue
-        if node_labeling[u] == node_labeling[v]:
+    g_copy.remove_edges_from(edges_to_cut)
+
+    # 3. 构造每个节点的连通分量编号
+    components = list(nx.connected_components(g_copy))
+    label = {}
+    for idx, comp in enumerate(components):
+        for node in comp:
+            label[node] = idx
+
+    # 4. 验证所有 cut=1 的边是否真的跨分量
+    for u, v in edges_to_cut:
+        if label[u] == label[v]:
+            if verbose:
+                print(f"Edge ({u}, {v}) is cut but endpoints are still in same component.")
             return False
+
+    # 5. 所有 cut 边都成功断开
     return True
+
+# def is_feasible_cut(graph: nx.Graph, cut_edges: dict):  # is it necessary, will it produce infeasible when join or cut?
+#     g_copy = graph.copy()
+#     g_copy.remove_edges_from([e for e, val in cut_edges.items() if val == 1])
+#     components = nx.connected_components(g_copy)
+#     node_labeling = {n: i for i, comp in enumerate(components) for n in comp}
+#
+#     for (u, v), val in cut_edges.items():
+#         if val != 1:
+#             continue
+#         if u not in node_labeling or v not in node_labeling:
+#             continue
+#         if node_labeling[u] == node_labeling[v]:
+#             return False
+#     return True
 
 
 # def update_best_if_feasible(graph, cut_edges, obj, best):

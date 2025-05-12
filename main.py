@@ -14,13 +14,10 @@ def get_node_labeling(graph: nx.Graph, cut_edges: dict):
 
 
 def main():
-    graph, costs, pos = get_random_costs_graph()
-    # graph, costs, pos = get_test_zeros_graph()
-    # graph, costs, pos = get_trivial_graph()
-
-    # plot the original graph
+    graph, costs, pos = get_random_costs_graph(seed=37, shape=(2, 3))
+    for e in graph.edges:
+        print(f"({e[0]}, {e[1]}): {costs[e]}")
     plot_multicut_result(graph, costs, pos, title="Original Graph")
-
     # === ILP Solver ===
     solver_ilp = ILPSolver(graph, costs, log=False)
     start_time = time.time()
@@ -29,24 +26,55 @@ def main():
     print(f"ILP_multicut took {elapsed_ilp:.4f} seconds")
     print("multicut ILP obj:", obj_ilp)
     print("cut edge set:", {e for e, v in multicut_ilp.items() if v == 1})
-
     node_labeling_ilp = get_node_labeling(graph, multicut_ilp)
     plot_multicut_result(graph, costs, pos, multicut_ilp, node_labeling_ilp, title="ILP Multicut Result")
-
     # === Branch and Bound Solver ===
     solver_bnb = BnBSolver(graph, costs, log=False)
     start_time = time.time()
     multicut_bnb, obj_bnb, count_bnb = solver_bnb.solve()
     elapsed_bnb = time.time() - start_time
-    print(f"bnb_multicut took {elapsed_bnb:.4f} seconds") #0.1763 for shape=(5, 8)
+    print(f"bnb_multicut took {elapsed_bnb:.4f} seconds")  # 0.1763 for shape=(5, 8)
     print("multicut bnb obj:", obj_bnb)
     print("Number of feasible cuts achieving that object value:", count_bnb)
     print("cut edge set:", {e for e, v in multicut_bnb.items() if v == 1})
-    # for k in multicut_bnb:
-    #     multicut_bnb[k] = 0
-
     node_labeling_bnb = get_node_labeling(graph, multicut_bnb)
     plot_multicut_result(graph, costs, pos, multicut_bnb, node_labeling_bnb, title="BnB Multicut Result")
+    assert abs(obj_bnb - obj_ilp) < 1e-6
+
+    # for i in range(1000):
+    #     graph, costs, pos = get_random_costs_graph(seed=i, shape=(2, 3))
+    #     # graph, costs, pos = get_test_zeros_graph()
+    #     # graph, costs, pos = get_trivial_graph()
+    #
+    #     # plot the original graph
+    #     # plot_multicut_result(graph, costs, pos, title="Original Graph")
+    #
+    #     # === ILP Solver ===
+    #     solver_ilp = ILPSolver(graph, costs, log=False)
+    #     start_time = time.time()
+    #     multicut_ilp, obj_ilp = solver_ilp.solve()
+    #     elapsed_ilp = time.time() - start_time
+    #     print(f"ILP_multicut took {elapsed_ilp:.4f} seconds")
+    #     print("multicut ILP obj:", obj_ilp)
+    #     print("cut edge set:", {e for e, v in multicut_ilp.items() if v == 1})
+    #     #
+    #     # node_labeling_ilp = get_node_labeling(graph, multicut_ilp)
+    #     # plot_multicut_result(graph, costs, pos, multicut_ilp, node_labeling_ilp, title="ILP Multicut Result")
+    #
+    #     # === Branch and Bound Solver ===
+    #     solver_bnb = BnBSolver(graph, costs, log=False)
+    #     start_time = time.time()
+    #     multicut_bnb, obj_bnb, count_bnb = solver_bnb.solve()
+    #     elapsed_bnb = time.time() - start_time
+    #     print(f"bnb_multicut took {elapsed_bnb:.4f} seconds") #0.1763 for shape=(5, 8)
+    #     print("multicut bnb obj:", obj_bnb)
+    #     print("Number of feasible cuts achieving that object value:", count_bnb)
+    #     print("cut edge set:", {e for e, v in multicut_bnb.items() if v == 1})
+    #     print(i)
+    #     assert abs(obj_bnb - obj_ilp) < 1e-6
+    #     #
+    #     # node_labeling_bnb = get_node_labeling(graph, multicut_bnb)
+    #     # plot_multicut_result(graph, costs, pos, multicut_bnb, node_labeling_bnb, title="BnB Multicut Result")
 
 
 if __name__ == "__main__":
