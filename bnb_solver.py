@@ -40,7 +40,8 @@ def contract_and_merge_costs(graph: nx.Graph, costs: dict, u, v, cut_edges: dict
             continue
         key = (min(a_, b_), max(a_, b_))
         new_costs[key] = new_costs.get(key, 0) + w  # 在这里会在 costs 中生成新的边：如果 key 不存在（也就是这是第一次添加这个边），就返回默认值 0；如果合并过程中有多个边变成了同一个边（如平行边），就把它们的成本加在一起。
-        print(f"→ Merged edge: {key}, cost = {w}, updated = {new_costs.get(key, 0) + w}")
+        if log:
+            print(f"→ Merged edge: {key}, cost = {w}, updated = {new_costs.get(key, 0) + w}")
     return new_graph, new_costs
 
 
@@ -144,32 +145,36 @@ def print_edge_labels_inline(graph, cut_edges, obj, best_obj):
     print("  Edges: " + "  ".join(parts))
 
 
-def update_best_if_feasible(graph, cut_edges, obj, best):
+def update_best_if_feasible(graph, cut_edges, obj, best, log=False):
     if is_feasible_cut(graph, cut_edges):
         if obj > best['obj']:
             best['obj'] = obj
             best['cut'] = cut_edges
             best['count'] = 1
-            print(f"[UPDATE] New best obj = {obj:.2f}")
-            print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
+            if log:
+                print(f"[UPDATE] New best obj = {obj:.2f}")
+                print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
         elif obj == best['obj']:
             best['count'] += 1
-            print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
+            if log:
+                print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
 
 
-def update_best_if_feasible_final(graph, cut_edges, obj, best):
+def update_best_if_feasible_final(graph, cut_edges, obj, best, log=False):
     if is_feasible_cut(graph, cut_edges):
         if obj > best['obj']:
             best['obj'] = obj
             best['cut'] = cut_edges
             best['count'] = 1
-            print(f"[UPDATE] New best obj = {obj:.2f}")
-            print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
+            if log:
+                print(f"[UPDATE] New best obj = {obj:.2f}")
+                print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
         elif obj == best['obj']:
             best[
                 'cut'] = cut_edges  # 这是唯一的不一样，如果是obj最好， cut_edges 还是替换一下，为啥要换啊，因为如果之前存的临时的，可能所有边还没处理完？虽然 没处理完，但是obj肯定会越来越大，因为是正的，为啥要算作best呢
             best['count'] += 1
-            print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
+            if log:
+                print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
 
 
 def heuristic_bound(graph, costs, cut_edges):
@@ -255,7 +260,8 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
         cut_edges_join, delta_obj = propagate_zero_labels(cut_edges_join, u, v, costs, log)
         obj_join = obj + max_cost + delta_obj
         if log:
-            print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f} + delta_obj {delta_obj:.2f}")
+            # print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f} + delta_obj {delta_obj:.2f}")
+            print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f}")
             print(f"  - New objective: {obj_join:.2f}")
         bnb_multicut(graph_join, costs_join, cut_edges_join, obj_join, best, log)
         if log:
@@ -283,7 +289,8 @@ class BnBSolver:
         self.log = log
 
     def solve(self):
-        print(f"graph for bnb solver:")
+        if self.log:
+            print(f"graph for bnb solver:")
         # normalized_costs = {
         #     (min(u, v), max(u, v)): w
         #     for (u, v), w in self.costs.items()
@@ -292,17 +299,25 @@ class BnBSolver:
         for (u, v), w in self.costs.items():
             key = (min(u, v), max(u, v))
             normalized_costs[key] = w
-            print(f"{key}: {w:.2f}")
+            if self.log:
+                print(f"{key}: {w:.2f}")
         cut_edges = {e: -1 for e in normalized_costs}
         best = {'obj': 0, 'cut': cut_edges, 'count': 0}
         bnb_multicut(self.graph.copy(), normalized_costs, cut_edges, obj=0, best=best, log=self.log)
-        print("Cut edges:")
+        if self.log:
+            print("Cut edges:")
         obj = 0
+        for u, v in self.graph.edges():
+            e = (min(u, v), max(u, v))
+            if best['cut'].get(e, -1) == 1:
+                cost = normalized_costs.get(e, 0)
+                obj += cost
         # for e, v in best['cut'].items(): #先注释掉不返回正确obj看看
         #     if v == 1:
         #         print(f"  {e} (cost={normalized_costs[e]:.4f})")
         #         obj += normalized_costs[e]
         # print(f"Total cost = {obj:.4f}")
         # obj = sum(self.costs[e] for e, v in best['cut'].items() if v == 1)
-        print("[DEBUG] Final raw best cut:", best['cut'])
+        if self.log:
+            print("[DEBUG] Final raw best cut:", best['cut'])
         return best['cut'], obj, best['count']

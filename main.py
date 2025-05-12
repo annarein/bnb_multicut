@@ -34,14 +34,14 @@ def main():
     plot_multicut_result(graph, costs, pos, multicut_ilp, node_labeling_ilp, title="ILP Multicut Result")
 
     # === Branch and Bound Solver ===
-    solver_bnb = BnBSolver(graph, costs, log=True)
+    solver_bnb = BnBSolver(graph, costs, log=False)
     start_time = time.time()
     multicut_bnb, obj_bnb, count_bnb = solver_bnb.solve()
     elapsed_bnb = time.time() - start_time
-    print(f"bnb_multicut took {elapsed_bnb:.4f} seconds")
-    # print("multicut bnb obj:", obj_bnb)
-    # print("Number of feasible cuts achieving that object value:", count_bnb)
-    # print("cut edge set:", {e for e, v in multicut_bnb.items() if v == 1})
+    print(f"bnb_multicut took {elapsed_bnb:.4f} seconds") #0.1763 for shape=(5, 8)
+    print("multicut bnb obj:", obj_bnb)
+    print("Number of feasible cuts achieving that object value:", count_bnb)
+    print("cut edge set:", {e for e, v in multicut_bnb.items() if v == 1})
     # for k in multicut_bnb:
     #     multicut_bnb[k] = 0
 
