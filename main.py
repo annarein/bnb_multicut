@@ -1,77 +1,84 @@
 import time
+import networkx as nx
 from ilp_solver import ILPSolver
 from bnb_solver import BnBSolver
-from graph_utils import get_random_costs_graph, get_trivial_graph, plot_multicut_result, get_test_zeros_graph
-import networkx as nx
+from graph_utils import get_random_costs_graph, plot_multicut_result
 
 
-def get_node_labeling(graph: nx.Graph, cut_edges: dict):
+def get_node_labeling_from_multicut(graph: nx.Graph, cut_edges: dict):
     g_copy = graph.copy()
-    g_copy.remove_edges_from([e for e in g_copy.edges if cut_edges.get((min(e[0], e[1]), max(e[0], e[1])), 0) == 1])
+    g_copy.remove_edges_from([
+        (u, v) for u, v in graph.edges
+        if cut_edges.get((min(u, v), max(u, v)), 0) == 1
+    ])
     components = nx.connected_components(g_copy)
-    node_labeling = {n: i for i, comp in enumerate(components) for n in comp}
-    return node_labeling
+    return {node: i for i, comp in enumerate(components) for node in comp}
+
+
+def cluster_to_multicut(graph: nx.Graph, cluster_dict: dict):
+    return {
+        (min(u, v), max(u, v)): 1 if cluster_dict[u] != cluster_dict[v] else 0
+        for u, v in graph.edges
+    }
 
 
 def main():
-    graph, costs, pos = get_random_costs_graph(seed=37, shape=(2, 3))
-    for node in graph.nodes:
-        graph.nodes[node]['cluster'] = {node}
-
-    plot_multicut_result(graph, costs, pos, title="Original Graph")
+    graph, costs, pos = get_random_costs_graph(seed=2, shape=(3, 2))
 
     # === ILP Solver ===
     solver_ilp = ILPSolver(graph.copy(), costs, log=False)
-    start_time = time.time()
+    start_ilp = time.time()
     multicut_ilp, obj_ilp = solver_ilp.solve()
-    elapsed_ilp = time.time() - start_time
-    print(f"ILP_multicut took {elapsed_ilp:.4f} seconds")
+    time_ilp = time.time() - start_ilp
+    print(f"ILP objective = {obj_ilp:.4f}, time = {time_ilp:.4f} s")
 
-    node_labeling_ilp = get_node_labeling(graph, multicut_ilp)
-    plot_multicut_result(graph, costs, pos, multicut_ilp, node_labeling_ilp, title="ILP Multicut Result")
+    node_labeling_ilp = get_node_labeling_from_multicut(graph, multicut_ilp)
+    plot_multicut_result(graph, pos, title="ILP Multicut Result",
+                         multicut=multicut_ilp, node_labeling=node_labeling_ilp)
 
     # === Branch and Bound Solver ===
-    solver_bnb = BnBSolver(graph.copy(), costs, log=True)
-    start_time = time.time()
-    multicut_bnb, obj_bnb, count_bnb = solver_bnb.solve()
-    elapsed_bnb = time.time() - start_time
-    print(f"bnb_multicut took {elapsed_bnb:.4f} seconds")
-    print(f"count_bnb: {count_bnb}")
-    print(obj_bnb, obj_ilp)
-    node_labeling_bnb = get_node_labeling(graph, multicut_bnb)
-    plot_multicut_result(graph, costs, pos, multicut_bnb, node_labeling_bnb, title="BnB Multicut Result")
+    solver_bnb = BnBSolver(graph.copy(), log=False)
+    start_bnb = time.time()
+    cluster_bnb, obj_bnb, count_bnb = solver_bnb.solve()
+    time_bnb = time.time() - start_bnb
+    print(f"BnB objective = {obj_bnb:.4f}, time = {time_bnb:.4f} s, count = {count_bnb}")
 
-    # for i in range(1000):
-    #     graph, costs, pos = get_random_costs_graph(seed=i, shape=(2, 3))
-    #     # graph, costs, pos = get_test_zeros_graph()
-    #     # graph, costs, pos = get_trivial_graph()
-    #
-    #     # plot_multicut_result(graph, costs, pos, title="Original Graph")
-    #
-    #     # === ILP Solver ===
-    #     solver_ilp = ILPSolver(graph.copy(), costs, log=False)
-    #     start_time = time.time()
-    #     multicut_ilp, obj_ilp = solver_ilp.solve()
-    #     elapsed_ilp = time.time() - start_time
-    #     print(f"ILP_multicut took {elapsed_ilp:.4f} seconds")
-    #     #
-    #     # node_labeling_ilp = get_node_labeling(graph, multicut_ilp)
-    #     # plot_multicut_result(graph, costs, pos, multicut_ilp, node_labeling_ilp, title="ILP Multicut Result")
-    #
-    #     # === Branch and Bound Solver ===
-    #     solver_bnb = BnBSolver(graph.copy(), costs, log=True)
-    #     start_time = time.time()
-    #     multicut_bnb, obj_bnb, count_bnb = solver_bnb.solve()
-    #     elapsed_bnb = time.time() - start_time
-    #     print(f"bnb_multicut took {elapsed_bnb:.4f} seconds")
-    #     print(f"count_bnb: {count_bnb}")
-    #     print(obj_bnb, obj_ilp)
-    #     print(i)
-    #     assert abs(obj_bnb - obj_ilp) < 1e-6
+    multicut_bnb = cluster_to_multicut(graph, cluster_bnb)
+    node_labeling_bnb = get_node_labeling_from_multicut(graph, multicut_bnb)
+    plot_multicut_result(graph, pos, title="BnB Multicut Result",
+                         multicut=multicut_bnb, node_labeling=node_labeling_bnb)
 
-        # node_labeling_bnb = get_node_labeling(graph, multicut_bnb)
-        # plot_multicut_result(graph, costs, pos, multicut_bnb, node_labeling_bnb, title="BnB Multicut Result")
+
+def benchmark(num_instances=100, shape=(2, 3), tolerance=1e-6):
+    for seed in range(num_instances):
+        print(f"\n=== Seed {seed} ===")
+        graph, costs, pos = get_random_costs_graph(seed=seed, shape=shape)
+
+        # === ILP Solver ===
+        solver_ilp = ILPSolver(graph.copy(), costs, log=False)
+        multicut_ilp, obj_ilp = solver_ilp.solve()
+
+        # === BnB Solver ===
+        solver_bnb = BnBSolver(graph.copy(), log=False)
+        cluster_bnb, obj_bnb, count_bnb = solver_bnb.solve()
+
+        print(f"ILP: {obj_ilp:.6f},  BnB: {obj_bnb:.6f},  count = {count_bnb}")
+
+        if abs(obj_ilp - obj_bnb) > tolerance:
+            print("❌ Mismatch detected!")
+            multicut_bnb = cluster_to_multicut(graph, cluster_bnb)
+            node_labeling_ilp = get_node_labeling_from_multicut(graph, multicut_ilp)
+            node_labeling_bnb = get_node_labeling_from_multicut(graph, multicut_bnb)
+
+            plot_multicut_result(graph, pos, title=f"ILP (Obj={obj_ilp:.2f})",
+                                 multicut=multicut_ilp, node_labeling=node_labeling_ilp)
+            plot_multicut_result(graph, pos, title=f"BnB (Obj={obj_bnb:.2f})",
+                                 multicut=multicut_bnb, node_labeling=node_labeling_bnb)
+            break
+    else:
+        print(f"\n✅ All {num_instances} instances passed.")
 
 
 if __name__ == "__main__":
-    main()
+    main()  # for single test + visualization
+    # benchmark(num_instances=100, shape=(2, 3))  # for batch correctness check

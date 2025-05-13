@@ -1,43 +1,42 @@
-import copy
 import networkx as nx
 from collections import deque
 
-def contract_and_merge_costs(graph: nx.Graph, costs: dict, u, v, cut_edges: dict, log=False):
-    cut_edges = cut_edges.copy()
-    for (a, b) in costs:
-        a_ = u if a == v else a
-        b_ = u if b == v else b
-        if a_ == b_:
-            continue
-        merged_edge = (min(a_, b_), max(a_, b_))
-        original_edge = (min(a, b), max(a, b))
-        cut_edges.setdefault(original_edge, -1)
-        cut_edges.setdefault(merged_edge, -1)
-        if cut_edges[original_edge] == 1 or cut_edges[merged_edge] == 1:
-            for (a, b) in costs:
-                a_ = u if a == v else a
-                b_ = u if b == v else b
-                if a_ == b_:
-                    continue
-                edge = (min(a_, b_), max(a_, b_))
-                cut_edges[edge] = 1
-    new_graph = nx.contracted_nodes(graph, u, v, self_loops=False)
-    new_costs = {}
-    for (a, b), w in costs.items():
-        a_ = u if a == v else a
-        b_ = u if b == v else b
-        if a_ == b_:
-            continue
-        merged_edge = (min(a_, b_), max(a_, b_))
-        new_costs[merged_edge] = new_costs.get(merged_edge, 0) + w
-    return new_graph, new_costs
 
-def propagate_zero_labels(cut_edges, u, v, costs, graph, log=False):
+def merge_clusters(graph, u, v):
+    original_u = graph.nodes[u]['cluster'].copy()
+    original_v = graph.nodes[v]['cluster'].copy()
+    graph.nodes[u]['cluster'] |= graph.nodes[v]['cluster']
+    graph.nodes[v]['cluster'] = graph.nodes[u]['cluster']
+    return ('merge', u, v, original_u, original_v)
+
+
+def unmerge_clusters(graph, op):
+    _, u, v, orig_u, orig_v = op
+    graph.nodes[u]['cluster'] = orig_u
+    graph.nodes[v]['cluster'] = orig_v
+
+
+def remove_edge(graph, u, v):
+    if graph.has_edge(u, v):
+        weight = graph[u][v]['weight']
+        graph.remove_edge(u, v)
+        return ('delete', u, v, weight)
+    return None
+
+
+def restore_edge(graph, op):
+    if op:
+        _, u, v, weight = op
+        graph.add_edge(u, v, weight=weight)
+
+
+def propagate_zero_labels(graph: nx.Graph, u, v, log=False):
     label_graph = {}
-    for (a, b), val in cut_edges.items():
-        if val == 0:
+    for a, b in graph.edges:
+        if graph.nodes[a]['cluster'] == graph.nodes[b]['cluster']:
             label_graph.setdefault(a, set()).add(b)
             label_graph.setdefault(b, set()).add(a)
+
     visited = set()
     queue = deque([u, v])
     while queue:
@@ -48,116 +47,79 @@ def propagate_zero_labels(cut_edges, u, v, costs, graph, log=False):
         for neighbor in label_graph.get(node, []):
             if neighbor not in visited:
                 queue.append(neighbor)
+
     visited = list(visited)
-    newly_uncut = []
     total_added_cost = 0
+    ops = []
     for i in range(len(visited)):
         for j in range(i + 1, len(visited)):
             n1, n2 = visited[i], visited[j]
-            edge = (min(n1, n2), max(n1, n2))
-            if edge in cut_edges and cut_edges[edge] == -1:
-                if edge in costs:
-                    graph_, costs_ = contract_and_merge_costs(graph, costs, n1, n2, cut_edges, log)
-                    if graph_ is None:
-                        continue
-                    graph = graph_
-                    costs = costs_
-                    total_added_cost += costs.get(edge, 0)
-                cut_edges[edge] = 0
-                newly_uncut.append(edge)
-    return graph, costs, total_added_cost
+            if graph.has_edge(n1, n2) and graph.nodes[n1]['cluster'] != graph.nodes[n2]['cluster']:
+                total_added_cost += graph[n1][n2]['weight']
+                op = merge_clusters(graph, n1, n2)
+                ops.append(op)
+    return total_added_cost, ops
 
-def is_feasible_cut(graph: nx.Graph, cut_edges: dict):
-    g_copy = graph.copy()
-    g_copy.remove_edges_from([e for e, val in cut_edges.items() if val == 1])
-    components = nx.connected_components(g_copy)
-    node_labeling = {n: i for i, comp in enumerate(components) for n in comp}
-    for (u, v), val in cut_edges.items():
-        if val != 1:
-            continue
-        if u not in node_labeling or v not in node_labeling:
-            continue
-        if node_labeling[u] == node_labeling[v]:
-            return False
+
+def is_feasible(graph: nx.Graph):
+    for u, v in graph.edges:
+        if graph.nodes[u]['cluster'] != graph.nodes[v]['cluster']:
+            return False  # There is an edge within different clusters — this violates feasibility
     return True
 
-def update_best_if_feasible_final(graph, cut_edges, obj, best):
-    if is_feasible_cut(graph, cut_edges):
+
+def update_best_if_feasible(graph, obj, best):
+    if is_feasible(graph):
         if obj > best['obj']:
             best['obj'] = obj
-            best['cut'] = cut_edges
+            best['graph'] = {n: graph.nodes[n]['cluster'].copy() for n in graph.nodes}
             best['count'] = 1
         elif obj == best['obj']:
-            best['cut'] = cut_edges
+            best['graph'] = {n: graph.nodes[n]['cluster'].copy() for n in graph.nodes}
             best['count'] += 1
 
-def heuristic_bound(graph, costs, cut_edges):
-    g_copy = nx.Graph()
-    g_copy.add_nodes_from(graph.nodes)
-    for (u, v), val in cut_edges.items():
-        if val == 0 and graph.has_edge(u, v):
-            g_copy.add_edge(u, v)
-    components = list(nx.connected_components(g_copy))
-    node_labeling = {n: i for i, comp in enumerate(components) for n in comp}
-    potential_gain = sum(
-        w for (u, v), w in costs.items()
-        if w > 0 and graph.has_edge(u, v)
-        and node_labeling.get(u) is not None
-        and node_labeling.get(v) is not None
-        and node_labeling[u] != node_labeling[v]
-    )
-    return potential_gain
 
-def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=False):
-    if not costs:
-        cut_edges_copy = cut_edges.copy()
-        for e in cut_edges_copy:
-            if cut_edges_copy[e] == -1:
-                cut_edges_copy[e] = 1
-        update_best_if_feasible_final(graph, cut_edges_copy, obj, best)
-        return None
-    bound = sum(w for w in costs.values() if w > 0)
-    if obj + bound < best['obj']:
-        return None
-    edge, max_cost = max(costs.items(), key=lambda item: item[1])
+def bnb_multicut(graph: nx.Graph, obj, best: dict, log=False):
+    remaining_edges = [(u, v) for u, v in graph.edges if graph.nodes[u]['cluster'] != graph.nodes[v]['cluster']]
+    if not remaining_edges:
+        update_best_if_feasible(graph, obj, best)
+        return
+
+    edge = max(remaining_edges, key=lambda e: graph[e[0]][e[1]]['weight'])
     u, v = edge
-    edge_key = (min(u, v), max(u, v))
-    skip_join = (len(costs) == 1 and max_cost <= 0)
-    if skip_join:
-        graph_join = None
-    else:
-        graph_join, costs_join = contract_and_merge_costs(graph.copy(), costs, u, v, cut_edges, log=log)
-    if graph_join is not None:
-        cut_edges_join = cut_edges.copy()
-        cut_edges_join[edge_key] = 0
-        graph_join, costs_join, delta_obj = propagate_zero_labels(cut_edges_join, u, v, costs, graph, log)
-        obj_join = obj + max_cost + delta_obj
-        bnb_multicut(graph_join, costs_join, cut_edges_join, obj_join, best, log)
-    graph_cut = graph.copy()
-    graph_cut.remove_edge(u, v)
-    costs_cut = {e: w for e, w in costs.items() if e != edge}
-    cut_edges_cut = cut_edges.copy()
-    cut_edges_cut[edge_key] = 1
-    bnb_multicut(graph_cut, costs_cut, cut_edges_cut, obj, best, log)
+    w = graph[u][v]['weight']
+
+    # --- join branch ---
+    if not (len(remaining_edges) == 1 and w <= 0):
+        op1 = merge_clusters(graph, u, v)
+        delta_obj, merge_ops = propagate_zero_labels(graph, u, v, log)
+        bnb_multicut(graph, obj + w + delta_obj, best, log)
+        for op in reversed(merge_ops):
+            unmerge_clusters(graph, op)
+        unmerge_clusters(graph, op1)
+
+    # --- cut branch ---
+    op2 = remove_edge(graph, u, v)
+    bnb_multicut(graph, obj, best, log)
+    restore_edge(graph, op2)
+
 
 class BnBSolver:
-    def __init__(self, graph, costs, log=False):
+    def __init__(self, graph: nx.Graph, log=False):
         self.graph = graph
-        self.costs = costs
         self.log = log
 
     def solve(self):
-        normalized_costs = {
-            (min(u, v), max(u, v)): w
-            for (u, v), w in self.costs.items()
-        }
-        cut_edges = {e: -1 for e in normalized_costs}
-        best = {'obj': 0, 'cut': cut_edges, 'count': 0}
-        bnb_multicut(self.graph.copy(), normalized_costs, cut_edges, obj=0, best=best, log=self.log)
-        obj = 0
-        for u, v in self.graph.edges():
-            e = (min(u, v), max(u, v))
-            if best['cut'].get(e, -1) == 1:
-                cost = self.costs.get(e, 0)
-                obj += cost
-        return best['cut'], obj, best['count']
+        for node in self.graph.nodes:
+            self.graph.nodes[node]['cluster'] = {node}  # reset cluster state for fresh solve
+
+        best = {'obj': 0, 'graph': {}, 'count': 0}
+        bnb_multicut(self.graph, obj=0, best=best, log=self.log)
+
+        obj = sum(
+            self.graph[u][v]['weight']
+            for u, v in self.graph.edges
+            if best['graph'].get(u) and best['graph'].get(v)
+            and best['graph'][u] != best['graph'][v]
+        )
+        return best['graph'], obj, best['count']
