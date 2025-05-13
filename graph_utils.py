@@ -20,11 +20,12 @@ def get_random_costs_graph(seed=2, bias=0.3, shape=(5, 8)):
     graph = nx.grid_graph(shape)
     costs = {}
     for u, v in graph.edges():
+        # edge = tuple(sorted((u, v)))
         p = np.random.rand()
         p = 1 / (1 + (1 - p) / p * bias / (1 - bias))
-        # edge = tuple(sorted((u, v)))  # make sure edge key is sorted
-        # costs[edge] = np.log(p / (1 - p))
         costs[(u, v)] = np.log(p / (1 - p))
+        # costs[edge] = np.log(p / (1 - p))
+        # graph.add_edge(*edge, weight=costs)
     pos = {n: n for n in graph.nodes}
     return graph, costs, pos
 
