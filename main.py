@@ -21,9 +21,12 @@ def cluster_to_multicut(graph: nx.Graph, cluster_dict: dict):
         for u, v in graph.edges
     }
 
+def visualize_multicut_solution(graph, pos, multicut_dict, title):
+    node_labels = get_node_labeling_from_multicut(graph, multicut_dict)
+    plot_multicut_result(graph, pos, title=title, multicut=multicut_dict, node_labeling=node_labels)
 
 def main():
-    graph, costs, pos = get_random_costs_graph(seed=2, shape=(3, 2))
+    graph, costs, pos = get_random_costs_graph(seed=37, shape=(2, 3))
 
     # === ILP Solver ===
     solver_ilp = ILPSolver(graph.copy(), costs, log=False)
@@ -31,10 +34,7 @@ def main():
     multicut_ilp, obj_ilp = solver_ilp.solve()
     time_ilp = time.time() - start_ilp
     print(f"ILP objective = {obj_ilp:.4f}, time = {time_ilp:.4f} s")
-
-    node_labeling_ilp = get_node_labeling_from_multicut(graph, multicut_ilp)
-    plot_multicut_result(graph, pos, title="ILP Multicut Result",
-                         multicut=multicut_ilp, node_labeling=node_labeling_ilp)
+    visualize_multicut_solution(graph, pos, multicut_ilp, "ILP Multicut Result")
 
     # === Branch and Bound Solver ===
     solver_bnb = BnBSolver(graph.copy(), log=False)
@@ -44,9 +44,7 @@ def main():
     print(f"BnB objective = {obj_bnb:.4f}, time = {time_bnb:.4f} s, count = {count_bnb}")
 
     multicut_bnb = cluster_to_multicut(graph, cluster_bnb)
-    node_labeling_bnb = get_node_labeling_from_multicut(graph, multicut_bnb)
-    plot_multicut_result(graph, pos, title="BnB Multicut Result",
-                         multicut=multicut_bnb, node_labeling=node_labeling_bnb)
+    visualize_multicut_solution(graph, pos, multicut_bnb, "BnB Multicut Result")
 
 
 def benchmark(num_instances=100, shape=(2, 3), tolerance=1e-6):
@@ -67,13 +65,8 @@ def benchmark(num_instances=100, shape=(2, 3), tolerance=1e-6):
         if abs(obj_ilp - obj_bnb) > tolerance:
             print("❌ Mismatch detected!")
             multicut_bnb = cluster_to_multicut(graph, cluster_bnb)
-            node_labeling_ilp = get_node_labeling_from_multicut(graph, multicut_ilp)
-            node_labeling_bnb = get_node_labeling_from_multicut(graph, multicut_bnb)
-
-            plot_multicut_result(graph, pos, title=f"ILP (Obj={obj_ilp:.2f})",
-                                 multicut=multicut_ilp, node_labeling=node_labeling_ilp)
-            plot_multicut_result(graph, pos, title=f"BnB (Obj={obj_bnb:.2f})",
-                                 multicut=multicut_bnb, node_labeling=node_labeling_bnb)
+            visualize_multicut_solution(graph, pos, multicut_ilp, "ILP Multicut Result")
+            visualize_multicut_solution(graph, pos, multicut_bnb, "BnB Multicut Result")
             break
     else:
         print(f"\n✅ All {num_instances} instances passed.")
