@@ -14,14 +14,16 @@ def get_node_labeling(graph: nx.Graph, cut_edges: dict):
 
 
 def main():
-    graph, costs, pos = get_random_costs_graph(seed=37, shape=(2, 3))
-    for node in graph.nodes:
-        graph.nodes[node]['cluster'] = {node}
+    graph, costs, pos = get_random_costs_graph(seed=37, shape=(2,3))
+    for u, v in graph.edges():
+        print(u, v, costs[(u, v)])
+    # for node in graph.nodes:
+    #     graph.nodes[node]['cluster'] = {node}
 
     plot_multicut_result(graph, costs, pos, title="Original Graph")
 
     # === ILP Solver ===
-    solver_ilp = ILPSolver(graph.copy(), costs, log=False)
+    solver_ilp = ILPSolver(graph.copy(), costs)
     start_time = time.time()
     multicut_ilp, obj_ilp = solver_ilp.solve()
     elapsed_ilp = time.time() - start_time
@@ -31,7 +33,7 @@ def main():
     plot_multicut_result(graph, costs, pos, multicut_ilp, node_labeling_ilp, title="ILP Multicut Result")
 
     # === Branch and Bound Solver ===
-    solver_bnb = BnBSolver(graph.copy(), costs, log=True)
+    solver_bnb = BnBSolver(graph.copy(), costs)
     start_time = time.time()
     multicut_bnb, obj_bnb, count_bnb = solver_bnb.solve()
     elapsed_bnb = time.time() - start_time

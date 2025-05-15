@@ -22,9 +22,9 @@ def get_random_costs_graph(seed=2, bias=0.3, shape=(5, 7)):
     for u, v in graph.edges():
         p = np.random.rand()
         p = 1 / (1 + (1 - p) / p * bias / (1 - bias))
-        # edge = tuple(sorted((u, v)))  # make sure edge key is sorted
-        # costs[edge] = np.log(p / (1 - p))
-        costs[(u, v)] = np.log(p / (1 - p))
+        edge = tuple(sorted((u, v)))  # make sure edge key is sorted
+        costs[edge] = np.log(p / (1 - p))
+        # costs[(u, v)] = np.log(p / (1 - p))
     pos = {n: n for n in graph.nodes}
     return graph, costs, pos
 
