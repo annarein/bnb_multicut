@@ -29,7 +29,7 @@ def main():
     graph, costs, pos = get_random_costs_graph(seed=37, shape=(2, 3))
 
     # === ILP Solver ===
-    solver_ilp = ILPSolver(graph.copy(), costs, log=False)
+    solver_ilp = ILPSolver(graph.copy(), costs)
     start_ilp = time.time()
     multicut_ilp, obj_ilp = solver_ilp.solve()
     time_ilp = time.time() - start_ilp
@@ -37,7 +37,7 @@ def main():
     visualize_multicut_solution(graph, pos, multicut_ilp, "ILP Multicut Result")
 
     # === Branch and Bound Solver ===
-    solver_bnb = BnBSolver(graph.copy(), log=False)
+    solver_bnb = BnBSolver(graph.copy())
     start_bnb = time.time()
     cluster_bnb, obj_bnb, count_bnb = solver_bnb.solve()
     time_bnb = time.time() - start_bnb
@@ -53,11 +53,11 @@ def benchmark(num_instances=100, shape=(2, 3), tolerance=1e-6):
         graph, costs, pos = get_random_costs_graph(seed=seed, shape=shape)
 
         # === ILP Solver ===
-        solver_ilp = ILPSolver(graph.copy(), costs, log=False)
+        solver_ilp = ILPSolver(graph.copy(), costs)
         multicut_ilp, obj_ilp = solver_ilp.solve()
 
         # === BnB Solver ===
-        solver_bnb = BnBSolver(graph.copy(), log=False)
+        solver_bnb = BnBSolver(graph.copy())
         cluster_bnb, obj_bnb, count_bnb = solver_bnb.solve()
 
         print(f"ILP: {obj_ilp:.6f},  BnB: {obj_bnb:.6f},  count = {count_bnb}")

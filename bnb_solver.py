@@ -30,7 +30,7 @@ def restore_edge(graph, op):
         graph.add_edge(u, v, weight=weight)
 
 
-def propagate_zero_labels(graph: nx.Graph, u, v, log=False):
+def propagate_zero_labels(graph: nx.Graph, u, v):
     label_graph = {}
     for a, b in graph.edges:
         if graph.nodes[a]['cluster'] == graph.nodes[b]['cluster']:
@@ -92,7 +92,7 @@ def bnb_multicut(graph: nx.Graph, obj, best: dict, log=False):
     # --- join branch ---
     if not (len(remaining_edges) == 1 and w <= 0):
         op1 = merge_clusters(graph, u, v)
-        delta_obj, merge_ops = propagate_zero_labels(graph, u, v, log)
+        delta_obj, merge_ops = propagate_zero_labels(graph, u, v)
         bnb_multicut(graph, obj + w + delta_obj, best, log)
         for op in reversed(merge_ops):
             unmerge_clusters(graph, op)
@@ -105,16 +105,15 @@ def bnb_multicut(graph: nx.Graph, obj, best: dict, log=False):
 
 
 class BnBSolver:
-    def __init__(self, graph: nx.Graph, log=False):
+    def __init__(self, graph: nx.Graph):
         self.graph = graph
-        self.log = log
 
     def solve(self):
         for node in self.graph.nodes:
             self.graph.nodes[node]['cluster'] = {node}  # reset cluster state for fresh solve
 
         best = {'obj': 0, 'graph': {}, 'count': 0}
-        bnb_multicut(self.graph, obj=0, best=best, log=self.log)
+        bnb_multicut(self.graph, obj=0, best=best)
 
         obj = sum(
             self.graph[u][v]['weight']
