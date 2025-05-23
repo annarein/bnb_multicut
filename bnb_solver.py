@@ -2,48 +2,88 @@ import networkx as nx
 from collections import deque
 
 
-def contract_and_merge_costs(graph: nx.Graph, costs: dict, u, v, cut_edges: dict, log=False):
-    """
-    Attempts to merge node v into node u, while checking for cut conflicts.
+# def contract_and_merge_costs(graph: nx.Graph, costs: dict, u, v, cut_edges: dict, log=False):
+#     """
+#     Attempts to merge node v into node u, while checking for cut conflicts.
+#
+#     Phase 1: Check if the merge would introduce conflicts.
+#     If any existing or resulting edge is marked as "cut" (value 1), the merge is invalid.
+#
+#     Phase 2: If no conflict, perform the merge and construct a new cost dictionary.
+#     If multiple edges collapse into the same key, their costs are summed.
+#
+#     Returns:
+#         - new_graph: the contracted graph (with v merged into u)
+#         - new_costs: updated cost dictionary after merging
+#         - if conflict: returns (None, None)
+#     """
+#     # Phase 1: Conflict check before applying any changes
+#     for (a, b) in costs:
+#         a_ = u if a == v else a
+#         b_ = u if b == v else b
+#         if a_ == b_:
+#             continue
+#         key = (min(a_, b_), max(a_, b_))
+#         # Check if either the original edge or the resulting edge is already marked as cut
+#         if cut_edges.get((min(a, b), max(a, b)), -1) == 1 or cut_edges.get(key, -1) == 1:  # 我在这里就避免了本来cut的边merge以后又 uncut（或者是undecided?)
+#             if log:
+#                 print(f"[Skip] merge ({u}, {v}) creates conflict: edge ({a}, {b}) or merged key {key} has cut label 1")
+#             return None, None  # Skip merge due to logical inconsistency
+#
+#     # Phase 2: Safe to apply merge, proceed with contraction and cost rebuilding
+#     new_graph = nx.contracted_nodes(graph, u, v, self_loops=False)
+#     new_costs = {}
+#     for (a, b), w in costs.items():
+#         a_ = u if a == v else a
+#         b_ = u if b == v else b
+#         if a_ == b_:
+#             continue
+#         key = (min(a_, b_), max(a_, b_))
+#         new_costs[key] = new_costs.get(key, 0) + w  # 在这里会在 costs 中生成新的边：如果 key 不存在（也就是这是第一次添加这个边），就返回默认值 0；如果合并过程中有多个边变成了同一个边（如平行边），就把它们的成本加在一起。
+#         if log:
+#             print(f"→ Merged edge: {key}, cost = {w}, updated = {new_costs.get(key, 0) + w}")
+#     return new_graph, new_costs
 
-    Phase 1: Check if the merge would introduce conflicts.
-    If any existing or resulting edge is marked as "cut" (value 1), the merge is invalid.
+def contract_and_merge_costs(graph: nx.Graph, costs: dict, a, b, cut_edges: dict, log=False):
+    if not graph.has_node(a) or not graph.has_node(b):
+        return None, None, None
 
-    Phase 2: If no conflict, perform the merge and construct a new cost dictionary.
-    If multiple edges collapse into the same key, their costs are summed.
+    # Step 1: prepare new cut_edges
+    new_cut_edges = cut_edges.copy()
 
-    Returns:
-        - new_graph: the contracted graph (with v merged into u)
-        - new_costs: updated cost dictionary after merging
-        - if conflict: returns (None, None)
-    """
-    # Phase 1: Conflict check before applying any changes
-    for (a, b) in costs:
-        a_ = u if a == v else a
-        b_ = u if b == v else b
-        if a_ == b_:
-            continue
-        key = (min(a_, b_), max(a_, b_))
-        # Check if either the original edge or the resulting edge is already marked as cut
-        if cut_edges.get((min(a, b), max(a, b)), -1) == 1 or cut_edges.get(key, -1) == 1:  # 我在这里就避免了本来cut的边merge以后又 uncut（或者是undecided?)
-            if log:
-                print(f"[Skip] merge ({u}, {v}) creates conflict: edge ({a}, {b}) or merged key {key} has cut label 1")
-            return None, None  # Skip merge due to logical inconsistency
+    neighbors = set(graph.neighbors(a)).union(graph.neighbors(b))
+    neighbors.discard(a)
+    neighbors.discard(b)
 
-    # Phase 2: Safe to apply merge, proceed with contraction and cost rebuilding
-    new_graph = nx.contracted_nodes(graph, u, v, self_loops=False)
+    for c in neighbors:
+        key_ac = (min(a, c), max(a, c))
+        key_bc = (min(b, c), max(b, c))
+        cut_bc = cut_edges.get(key_bc, -1)
+        if cut_bc == 1:
+            new_cut_edges[key_ac] = 1
+
+    # Step 2: prepare new_costs BEFORE merge
     new_costs = {}
-    for (a, b), w in costs.items():
-        a_ = u if a == v else a
-        b_ = u if b == v else b
-        if a_ == b_:
-            continue
-        key = (min(a_, b_), max(a_, b_))
-        new_costs[key] = new_costs.get(key, 0) + w  # 在这里会在 costs 中生成新的边：如果 key 不存在（也就是这是第一次添加这个边），就返回默认值 0；如果合并过程中有多个边变成了同一个边（如平行边），就把它们的成本加在一起。
-        if log:
-            print(f"→ Merged edge: {key}, cost = {w}, updated = {new_costs.get(key, 0) + w}")
-    return new_graph, new_costs
+    touched = set()
 
+    for c in neighbors:
+        key_ac = (min(a, c), max(a, c))
+        key_bc = (min(b, c), max(b, c))
+        cost_a = costs.get(key_ac, 0)
+        cost_b = costs.get(key_bc, 0)
+        new_costs[key_ac] = cost_a + cost_b
+        touched.add(key_ac)
+
+    # keep other costs unchanged
+    for (u, v), w in costs.items():
+        key = (min(u, v), max(u, v))
+        if key not in touched and b not in key:
+            new_costs[key] = w
+
+    # Step 3: merge
+    new_graph = nx.contracted_nodes(graph, a, b, self_loops=False)
+
+    return new_graph, new_costs, new_cut_edges
 
 def propagate_zero_labels(cut_edges, u, v, costs, log=False):
     """
@@ -284,9 +324,9 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
     if skip_join:
         graph_join = None
     else:
-        graph_join, costs_join = contract_and_merge_costs(graph.copy(), costs, u, v, cut_edges, log=log)
+        graph_join, costs_join, cut_edges_join = contract_and_merge_costs(graph, costs, u, v, cut_edges, log=log)
     if graph_join is not None:
-        cut_edges_join = cut_edges.copy()
+        # cut_edges_join = cut_edges.copy()
         cut_edges_join[edge_key] = 0  # 所以就是这一步把 cut_edges 多出原来graph不存在的边的
         cut_edges_join, delta_obj = propagate_zero_labels(cut_edges_join, u, v, costs, log)
         obj_join = obj + max_cost + delta_obj
@@ -343,12 +383,6 @@ class BnBSolver:
             if best['cut'].get(e, -1) == 1:
                 cost = normalized_costs.get(e, 0)
                 obj += cost
-        # for e, v in best['cut'].items(): #先注释掉不返回正确obj看看
-        #     if v == 1:
-        #         print(f"  {e} (cost={normalized_costs[e]:.4f})")
-        #         obj += normalized_costs[e]
-        # print(f"Total cost = {obj:.4f}")
-        # obj = sum(self.costs[e] for e, v in best['cut'].items() if v == 1)
         if self.log:
             print("[DEBUG] Final raw best cut:", best['cut'])
         return best['cut'], obj, best['count']
