@@ -126,20 +126,17 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
 
     # Step 3: For each pair of visited nodes, propagate 0-label if edge was undecided
     visited = list(visited)
-    newly_uncut = []
     for i in range(len(visited)):
         for j in range(i + 1, len(visited)):
             n1, n2 = visited[i], visited[j]
             edge = (min(n1, n2), max(n1, n2))
             if edge in cut_edges and cut_edges[edge] == -1:
                 cut_edges[edge] = 0
-                newly_uncut.append(edge)
                 if log:
                     found = "FOUND" if edge in costs else "NOT FOUND" # only have NOT FOUND result, maybe it's not necessary?
                     value = costs.get(edge, 0)
                     print(f"\033[96m  Propagate 0-label: edge {edge} with cost {value:.2f} ({found})\033[0m")
-    total_added_cost = sum(costs[e] for e in newly_uncut if e in costs)
-    return cut_edges, total_added_cost
+    return cut_edges
 
 def is_feasible_cut(graph: nx.Graph, cut_edges: dict, verbose=False) -> bool:
     # 1. 仅处理原始图中的边
@@ -328,8 +325,8 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
     if graph_join is not None:
         # cut_edges_join = cut_edges.copy()
         cut_edges_join[edge_key] = 0  # 所以就是这一步把 cut_edges 多出原来graph不存在的边的
-        cut_edges_join, delta_obj = propagate_zero_labels(cut_edges_join, u, v, costs, log)
-        obj_join = obj + max_cost + delta_obj
+        cut_edges_join = propagate_zero_labels(cut_edges_join, u, v, costs, log)
+        obj_join = obj + max_cost
         if log:
             # print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f} + delta_obj {delta_obj:.2f}")
             print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f}")
