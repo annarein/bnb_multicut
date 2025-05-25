@@ -94,15 +94,3 @@ Clusters (Optimal):
 { 3 4 }
 ...
 ```
-
----
-
-## 📄 License
-
-MIT License or as specified.
-
----
-
-## 🙋‍♀️ Author
-
-Developed by @annawang for multicut graph clustering experiments and educational purposes. Contributions or collaboration welcome!
