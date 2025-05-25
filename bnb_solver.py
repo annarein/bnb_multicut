@@ -258,7 +258,9 @@ def print_edge_label_groups(cut_edges: dict, tag: str = ""):
     print(f"  undecided edges:{undecided}")
 
 
-def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=False, use_tight_bound=True, depth=0):
+def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=False, use_tight_bound=True, depth=0, node_counter=None):
+    if node_counter is not None:
+        node_counter['count'] += 1  # 🔢 每次进入一个分支节点就 +1
     if not costs:
         if log:
             print(f"[NO COSTS] \033[92mcluster_obj={obj:.2f}\033[0m, best_obj={best['obj']:.2f}")
@@ -317,7 +319,7 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
             # print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f} + delta_obj {delta_obj:.2f}")
             print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f}")
             print(f"  - New objective: {obj_join:.2f}")
-        bnb_multicut(graph_join, costs_join, cut_edges_join, obj_join, best, log, use_tight_bound, depth + 1)
+        bnb_multicut(graph_join, costs_join, cut_edges_join, obj_join, best, log, use_tight_bound, depth + 1, node_counter)
         if log:
             print_edge_label_groups(cut_edges_join, f"after JOIN ({u},{v})")
 
@@ -331,7 +333,7 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
     cut_edges_cut[edge_key] = 1
     if log:
         print(f"[BRANCH] Cut: removing edge {edge_key} with cost {max_cost:.2f}, Objective unchanged: {obj:.2f}")
-    bnb_multicut(graph_cut, costs_cut, cut_edges_cut, obj, best, log, use_tight_bound, depth + 1)
+    bnb_multicut(graph_cut, costs_cut, cut_edges_cut, obj, best, log, use_tight_bound, depth + 1, node_counter)
     if log:
         print_edge_label_groups(cut_edges_cut, f"after CUT ({u},{v})")
 
@@ -367,6 +369,10 @@ class BnBSolver:
     def solve(self):
         if self.log:
             print(f"graph for bnb solver:")
+        # normalized_costs = {
+        #     (min(u, v), max(u, v)): w
+        #     for (u, v), w in self.costs.items()
+        # }
         normalized_costs = {}
         for (u, v), w in self.costs.items():
             key = (min(u, v), max(u, v))
@@ -376,6 +382,8 @@ class BnBSolver:
         cut_edges = {e: -1 for e in normalized_costs}
         best = {'obj': 0, 'cut': cut_edges, 'count': 0}
 
+        node_counter = {'count': 0}
+
         start = time.time()
         bnb_multicut(
             self.graph.copy(),
@@ -384,7 +392,8 @@ class BnBSolver:
             obj=0,
             best=best,
             log=self.log,
-            use_tight_bound=self.use_tight_bound
+            use_tight_bound=self.use_tight_bound,
+            node_counter=node_counter
         )
         end = time.time()
 
@@ -392,7 +401,7 @@ class BnBSolver:
             print("Cut edges:")
             print(f"[FINISH] total time = {end - start:.2f} seconds")
             # plot_bound_trace()
-
+            print(f"[STATS] Total nodes visited in BnB: {node_counter['count']}")
         obj = 0
         for u, v in self.graph.edges():
             e = (min(u, v), max(u, v))
