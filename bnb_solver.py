@@ -1,48 +1,9 @@
 import networkx as nx
 from collections import deque
+import matplotlib.pyplot as plt
+import time
 
 
-# def contract_and_merge_costs(graph: nx.Graph, costs: dict, u, v, cut_edges: dict, log=False):
-#     """
-#     Attempts to merge node v into node u, while checking for cut conflicts.
-#
-#     Phase 1: Check if the merge would introduce conflicts.
-#     If any existing or resulting edge is marked as "cut" (value 1), the merge is invalid.
-#
-#     Phase 2: If no conflict, perform the merge and construct a new cost dictionary.
-#     If multiple edges collapse into the same key, their costs are summed.
-#
-#     Returns:
-#         - new_graph: the contracted graph (with v merged into u)
-#         - new_costs: updated cost dictionary after merging
-#         - if conflict: returns (None, None)
-#     """
-#     # Phase 1: Conflict check before applying any changes
-#     for (a, b) in costs:
-#         a_ = u if a == v else a
-#         b_ = u if b == v else b
-#         if a_ == b_:
-#             continue
-#         key = (min(a_, b_), max(a_, b_))
-#         # Check if either the original edge or the resulting edge is already marked as cut
-#         if cut_edges.get((min(a, b), max(a, b)), -1) == 1 or cut_edges.get(key, -1) == 1:  # 我在这里就避免了本来cut的边merge以后又 uncut（或者是undecided?)
-#             if log:
-#                 print(f"[Skip] merge ({u}, {v}) creates conflict: edge ({a}, {b}) or merged key {key} has cut label 1")
-#             return None, None  # Skip merge due to logical inconsistency
-#
-#     # Phase 2: Safe to apply merge, proceed with contraction and cost rebuilding
-#     new_graph = nx.contracted_nodes(graph, u, v, self_loops=False)
-#     new_costs = {}
-#     for (a, b), w in costs.items():
-#         a_ = u if a == v else a
-#         b_ = u if b == v else b
-#         if a_ == b_:
-#             continue
-#         key = (min(a_, b_), max(a_, b_))
-#         new_costs[key] = new_costs.get(key, 0) + w  # 在这里会在 costs 中生成新的边：如果 key 不存在（也就是这是第一次添加这个边），就返回默认值 0；如果合并过程中有多个边变成了同一个边（如平行边），就把它们的成本加在一起。
-#         if log:
-#             print(f"→ Merged edge: {key}, cost = {w}, updated = {new_costs.get(key, 0) + w}")
-#     return new_graph, new_costs
 
 def contract_and_merge_costs(graph: nx.Graph, costs: dict, a, b, cut_edges: dict, log=False):
     if not graph.has_node(a) or not graph.has_node(b):
@@ -84,6 +45,7 @@ def contract_and_merge_costs(graph: nx.Graph, costs: dict, a, b, cut_edges: dict
     new_graph = nx.contracted_nodes(graph, a, b, self_loops=False)
 
     return new_graph, new_costs, new_cut_edges
+
 
 def propagate_zero_labels(cut_edges, u, v, costs, log=False):
     """
@@ -133,10 +95,11 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
             if edge in cut_edges and cut_edges[edge] == -1:
                 cut_edges[edge] = 0
                 if log:
-                    found = "FOUND" if edge in costs else "NOT FOUND" # only have NOT FOUND result, maybe it's not necessary?
+                    found = "FOUND" if edge in costs else "NOT FOUND"  # only have NOT FOUND result, maybe it's not necessary?
                     value = costs.get(edge, 0)
                     print(f"\033[96m  Propagate 0-label: edge {edge} with cost {value:.2f} ({found})\033[0m")
     return cut_edges
+
 
 def is_feasible_cut(graph: nx.Graph, cut_edges: dict, verbose=False) -> bool:
     # 1. 仅处理原始图中的边
@@ -165,6 +128,7 @@ def is_feasible_cut(graph: nx.Graph, cut_edges: dict, verbose=False) -> bool:
 
     # 5. 所有 cut 边都成功断开
     return True
+
 
 # def is_feasible_cut(graph: nx.Graph, cut_edges: dict):  # is it necessary, will it produce infeasible when join or cut?
 #     g_copy = graph.copy()
@@ -245,24 +209,61 @@ def update_best_if_feasible_final(graph, cut_edges, obj, best, log=False):
                 print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
 
 
-def heuristic_bound(graph, costs, cut_edges):
-    g_copy = nx.Graph()
-    g_copy.add_nodes_from(graph.nodes)
-    for (u, v), val in cut_edges.items():
-        if val == 0 and graph.has_edge(u, v):
-            g_copy.add_edge(u, v)
+bound_trace = []  # (depth, tighter_bound, naive_bound)
 
-    components = list(nx.connected_components(g_copy))
-    node_labeling = {n: i for i, comp in enumerate(components) for n in comp}
 
-    potential_gain = sum(
-        w for (u, v), w in costs.items()
-        if w > 0 and graph.has_edge(u, v)
-        and node_labeling.get(u) is not None
-        and node_labeling.get(v) is not None
-        and node_labeling[u] != node_labeling[v]
-    )
-    return potential_gain
+def compute_tight_upper_bound(graph: nx.Graph, costs: dict, cut_edges: dict, max_cycle_length: int = 6) -> float:
+    graph_edges = set(graph.edges())
+    E_plus = {e for e, w in costs.items() if w > 0 and e in graph_edges and cut_edges.get(e, -1) != 1}
+    E_minus = {e for e, w in costs.items() if w < 0 and e in graph_edges and cut_edges.get(e, -1) != 1}
+    G_plus = graph.edge_subgraph(E_plus).copy()
+
+    conflicted_cycles = []
+    for (u, v) in E_minus:
+        if u not in G_plus or v not in G_plus:
+            continue
+        try:
+            path = nx.shortest_path(G_plus, u, v)
+            if len(path) + 1 <= max_cycle_length:
+                cycle_edges = [(min(path[i], path[i + 1]), max(path[i], path[i + 1])) for i in range(len(path) - 1)]
+                rep_edge = (min(u, v), max(u, v))
+                cycle_edges.append(rep_edge)
+                if rep_edge in graph_edges and cut_edges.get(rep_edge, -1) != 1:
+                    conflicted_cycles.append(cycle_edges)
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            continue
+
+    used_edges = set()
+    reduce_total = 0
+    for cycle in sorted(conflicted_cycles, key=lambda cyc: len(cyc)):
+        if any(e in used_edges or cut_edges.get(e, -1) == 1 or e not in graph_edges for e in cycle):
+            continue
+        pos_edges = [e for e in cycle if e in E_plus and cut_edges.get(e, -1) != 1 and e in graph_edges]
+        if not pos_edges:
+            continue
+        delta = min(costs[e] for e in pos_edges)
+        reduce_total += delta
+        used_edges.update(cycle)
+
+    naive_upper_bound = sum(w for e, w in costs.items() if w > 0 and e in graph_edges and cut_edges.get(e, -1) != 1)
+    return naive_upper_bound - reduce_total
+
+
+def plot_bound_trace():
+    if not bound_trace:
+        print("[WARN] No bound trace to plot.")
+        return
+    depths, t_bounds, n_bounds = zip(*bound_trace)
+    plt.figure(figsize=(10, 4))
+    plt.plot(depths, t_bounds, label="Tight Bound", marker='o')
+    plt.plot(depths, n_bounds, label="Naive Bound", linestyle='--', marker='x')
+    plt.xlabel("Recursion Depth")
+    plt.ylabel("Upper Bound Estimate")
+    plt.title("Bound Comparison Per Branch")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
 
 def print_edge_label_groups(cut_edges: dict, tag: str = ""):
@@ -280,7 +281,7 @@ def print_edge_label_groups(cut_edges: dict, tag: str = ""):
     print(f"  undecided edges:{undecided}")
 
 
-def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=False):
+def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=False, use_tight_bound=True, depth=0):
     if not costs:
         if log:
             print(f"[NO COSTS] \033[92mcluster_obj={obj:.2f}\033[0m, best_obj={best['obj']:.2f}")
@@ -292,12 +293,20 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
         return None
 
     # Compute the optimistic bound (e.g., sum of remaining positive weights)
-    bound = sum(w for w in costs.values() if w > 0)
-    # bound = heuristic_bound(graph, costs, cut_edges)
+    # bound = sum(w for w in costs.values() if w > 0)
+    if use_tight_bound:
+        bound = compute_tight_upper_bound(graph, costs, cut_edges)
+    else:
+        graph_edges = set(graph.edges())
+        bound = sum(w for e, w in costs.items() if w > 0 and e in graph_edges and cut_edges.get(e, -1) != 1)
 
     if log:
         print(
             f"[ENTER BnB] \033[92mcluster_obj={obj:.2f}\033[0m, \033[91mbound={bound:.2f}\033[0m, best_obj={best['obj']:.2f}")
+    if log:
+        naive = sum(w for e, w in costs.items() if w > 0 and e in graph.edges and cut_edges.get(e, -1) != 1)
+        bound_trace.append((depth, bound, naive))
+        print(f"\033[93m[BOUND] tighter = {bound:.2f}, naive = {naive:.2f}, Δ = {naive - bound:.2f}\033[0m")
 
     if is_feasible_cut(graph, cut_edges):
         update_best_if_feasible(graph, cut_edges.copy(), obj, best)
@@ -350,19 +359,35 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
         print_edge_label_groups(cut_edges_cut, f"after CUT ({u},{v})")
 
 
+def benchmark_solver(graph, costs, log=False):
+    print("[BENCHMARK] Running with naive bound...")
+    solver_naive = BnBSolver(graph, costs, log=log, use_tight_bound=False)
+    start_naive = time.time()
+    _, obj_naive, count_naive = solver_naive.solve()
+    time_naive = time.time() - start_naive
+
+    print("[BENCHMARK] Running with tight bound...")
+    solver_tight = BnBSolver(graph, costs, log=log, use_tight_bound=True)
+    start_tight = time.time()
+    _, obj_tight, count_tight = solver_tight.solve()
+    time_tight = time.time() - start_tight
+
+    print("\n[RESULT SUMMARY]")
+    print(f"Naive Bound:  obj = {obj_naive:.2f}, time = {time_naive:.2f}s, nodes = {count_naive}")
+    print(f"Tight Bound:  obj = {obj_tight:.2f}, time = {time_tight:.2f}s, nodes = {count_tight}")
+    print(f"\033[93mSpeedup = {time_naive / time_tight:.2f}x, Δ obj = {obj_tight - obj_naive:.2f}\033[0m")
+
+
 class BnBSolver:
-    def __init__(self, graph, costs, log=False):
+    def __init__(self, graph, costs, log=False, use_tight_bound=True):
         self.graph = graph
         self.costs = costs
         self.log = log
+        self.use_tight_bound = use_tight_bound
 
     def solve(self):
         if self.log:
             print(f"graph for bnb solver:")
-        # normalized_costs = {
-        #     (min(u, v), max(u, v)): w
-        #     for (u, v), w in self.costs.items()
-        # }
         normalized_costs = {}
         for (u, v), w in self.costs.items():
             key = (min(u, v), max(u, v))
@@ -371,9 +396,24 @@ class BnBSolver:
                 print(f"{key}: {w:.2f}")
         cut_edges = {e: -1 for e in normalized_costs}
         best = {'obj': 0, 'cut': cut_edges, 'count': 0}
-        bnb_multicut(self.graph.copy(), normalized_costs, cut_edges, obj=0, best=best, log=self.log)
+
+        start = time.time()
+        bnb_multicut(
+            self.graph.copy(),
+            normalized_costs,
+            cut_edges,
+            obj=0,
+            best=best,
+            log=self.log,
+            use_tight_bound=self.use_tight_bound
+        )
+        end = time.time()
+
         if self.log:
             print("Cut edges:")
+            print(f"[FINISH] total time = {end - start:.2f} seconds")
+            plot_bound_trace()
+
         obj = 0
         for u, v in self.graph.edges():
             e = (min(u, v), max(u, v))

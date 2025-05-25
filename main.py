@@ -1,18 +1,19 @@
 import time
 from ilp_solver import ILPSolver
-from bnb_solver import BnBSolver
+from bnb_solver import BnBSolver, benchmark_solver
 from graph_generators import get_random_costs_graph, get_trivial_graph, get_test_zeros_graph
 import networkx as nx
 from visualizer import visualize_multicut_solution, plot_multicut_result
-
+import time
 
 
 def main():
-    graph, costs, pos = get_random_costs_graph(seed=37, shape=(10, 3))
-    # for u, v in graph.edges():
-    #     print(u, v, costs[(u, v)])
+    graph, costs, pos = get_random_costs_graph(seed=37, shape=(5, 8))
+    for u, v in graph.edges():
+        print(u, v, costs[(u, v)])
 
-    plot_multicut_result(graph, costs, pos, multicut=None, node_labeling=None, title="Original Graph")
+    # Original graph visualization (optional)
+    # plot_multicut_result(graph, costs, pos, multicut=None, node_labeling=None, title="Original Graph")
 
 
     # === ILP Solver ===
@@ -23,14 +24,17 @@ def main():
     print(f"ILP_multicut took {elapsed_ilp:.4f} seconds")
     visualize_multicut_solution(graph, costs, pos, multicut_ilp, "ILP Multicut Result")
 
+    # === Branch and Bound: benchmark both naive & tight ===
+    benchmark_solver(graph, costs, log=True)  # Turn off detailed logging for clean output
+
     # === Branch and Bound Solver ===
-    solver_bnb = BnBSolver(graph.copy(), costs)
+    solver_bnb = BnBSolver(graph.copy(), costs, False)
     start_time = time.time()
     multicut_bnb, obj_bnb, count_bnb = solver_bnb.solve()
     elapsed_bnb = time.time() - start_time
     print(f"bnb_multicut took {elapsed_bnb:.4f} seconds")
     print(f"count_bnb: {count_bnb}")
-    print(obj_bnb, obj_ilp)
+    # print(obj_bnb, obj_ilp)
     visualize_multicut_solution(graph, costs, pos, multicut_bnb, "BnB Multicut Result")
 
 
@@ -94,6 +98,6 @@ def run_cp_lib_instance():
 
 
 if __name__ == "__main__":
-    # main()  # for single test + visualization
+    main()  # for single test + visualization
     # benchmark(num_instances=100, shape=(2, 3))  # for batch correctness check
-    run_cp_lib_instance()
+    # run_cp_lib_instance()
