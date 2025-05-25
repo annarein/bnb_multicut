@@ -130,31 +130,6 @@ def is_feasible_cut(graph: nx.Graph, cut_edges: dict, verbose=False) -> bool:
     return True
 
 
-# def is_feasible_cut(graph: nx.Graph, cut_edges: dict):  # is it necessary, will it produce infeasible when join or cut?
-#     g_copy = graph.copy()
-#     g_copy.remove_edges_from([e for e, val in cut_edges.items() if val == 1])
-#     components = nx.connected_components(g_copy)
-#     node_labeling = {n: i for i, comp in enumerate(components) for n in comp}
-#
-#     for (u, v), val in cut_edges.items():
-#         if val != 1:
-#             continue
-#         if u not in node_labeling or v not in node_labeling:
-#             continue
-#         if node_labeling[u] == node_labeling[v]:
-#             return False
-#     return True
-
-
-# def update_best_if_feasible(graph, cut_edges, obj, best):
-#     if is_feasible_cut(graph, cut_edges):
-#         if obj > best['obj']:
-#             best['obj'] = obj
-#             best['cut'] = copy.deepcopy(cut_edges)
-#             best['count'] = 1
-#         elif obj == best['obj']:
-#             best['count'] += 1
-
 def print_edge_labels_inline(graph, cut_edges, obj, best_obj):
     RED = "\033[91m"
     GREEN = "\033[92m"
@@ -264,6 +239,8 @@ def plot_bound_trace():
     plt.grid(True)
     plt.tight_layout()
     plt.show()
+    # 🔧 Clear after plotting
+    bound_trace.clear()
 
 
 def print_edge_label_groups(cut_edges: dict, tag: str = ""):
@@ -340,7 +317,7 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
             # print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f} + delta_obj {delta_obj:.2f}")
             print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f}")
             print(f"  - New objective: {obj_join:.2f}")
-        bnb_multicut(graph_join, costs_join, cut_edges_join, obj_join, best, log)
+        bnb_multicut(graph_join, costs_join, cut_edges_join, obj_join, best, log, use_tight_bound, depth + 1)
         if log:
             print_edge_label_groups(cut_edges_join, f"after JOIN ({u},{v})")
 
@@ -354,7 +331,7 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
     cut_edges_cut[edge_key] = 1
     if log:
         print(f"[BRANCH] Cut: removing edge {edge_key} with cost {max_cost:.2f}, Objective unchanged: {obj:.2f}")
-    bnb_multicut(graph_cut, costs_cut, cut_edges_cut, obj, best, log)
+    bnb_multicut(graph_cut, costs_cut, cut_edges_cut, obj, best, log, use_tight_bound, depth + 1)
     if log:
         print_edge_label_groups(cut_edges_cut, f"after CUT ({u},{v})")
 
@@ -376,6 +353,8 @@ def benchmark_solver(graph, costs, log=False):
     print(f"Naive Bound:  obj = {obj_naive:.2f}, time = {time_naive:.2f}s, nodes = {count_naive}")
     print(f"Tight Bound:  obj = {obj_tight:.2f}, time = {time_tight:.2f}s, nodes = {count_tight}")
     print(f"\033[93mSpeedup = {time_naive / time_tight:.2f}x, Δ obj = {obj_tight - obj_naive:.2f}\033[0m")
+
+    plot_bound_trace()
 
 
 class BnBSolver:
@@ -412,7 +391,7 @@ class BnBSolver:
         if self.log:
             print("Cut edges:")
             print(f"[FINISH] total time = {end - start:.2f} seconds")
-            plot_bound_trace()
+            # plot_bound_trace()
 
         obj = 0
         for u, v in self.graph.edges():
