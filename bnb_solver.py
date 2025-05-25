@@ -61,17 +61,12 @@ def propagate_zero_labels(cut_edges, u, v, costs):
             if neighbor not in visited:
                 queue.append(neighbor)
     visited = list(visited)
-    # newly_uncut = []
-    total_added_cost = 0
     for i in range(len(visited)):
         for j in range(i + 1, len(visited)):
             n1, n2 = visited[i], visited[j]
             edge = (min(n1, n2), max(n1, n2))
             if edge in cut_edges and cut_edges[edge] == -1:
-                if edge in costs:
-                    total_added_cost += costs.get(edge, 0)
                 cut_edges[edge] = 0
-                # newly_uncut.append(edge)
     return costs
 
 
