@@ -1,6 +1,6 @@
 # 🧠 BnB Multicut Solver
 
-This project implements a **Branch and Bound algorithm** to solve the Multicut / Clique Partitioning problem on weighted graphs. It supports comparison against ILP-based solutions and known optimal solutions from the CP-Lib dataset.
+This project implements a **Branch and Bound algorithm** to solve the Multicut / Clique Partitioning problem on undirected weighted graphs. It supports comparison against ILP-based solutions and known optimal solutions from the CP-Lib dataset.
 
 ---
 
