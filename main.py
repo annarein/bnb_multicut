@@ -4,17 +4,16 @@ from bnb_solver import BnBSolver, benchmark_solver
 from graph_generators import get_random_costs_graph, get_trivial_graph, get_test_zeros_graph
 import networkx as nx
 from visualizer import visualize_multicut_solution, plot_multicut_result
-import time
 
 
 def main():
-    graph, costs, pos = get_random_costs_graph(seed=37, shape=(5, 8))
+    # graph, costs, pos = get_random_costs_graph(seed=53, shape=(4, 3))
+    # graph, costs, pos = get_test_zeros_graph(shape=(2, 2))
+    graph, costs, pos = get_random_costs_graph(seed=288, shape=(3, 3))
     for u, v in graph.edges():
         print(u, v, costs[(u, v)])
-
     # Original graph visualization (optional)
     # plot_multicut_result(graph, costs, pos, multicut=None, node_labeling=None, title="Original Graph")
-
 
     # === ILP Solver ===
     solver_ilp = ILPSolver(graph.copy(), costs)
@@ -23,9 +22,6 @@ def main():
     elapsed_ilp = time.time() - start_time
     print(f"ILP_multicut took {elapsed_ilp:.4f} seconds")
     visualize_multicut_solution(graph, costs, pos, multicut_ilp, "ILP Multicut Result")
-
-    # === Branch and Bound: benchmark both naive & tight ===
-    benchmark_solver(graph, costs, log=True)  # Turn off detailed logging for clean output
 
     # === Branch and Bound Solver ===
     solver_bnb = BnBSolver(graph.copy(), costs, False)
@@ -36,6 +32,12 @@ def main():
     print(f"count_bnb: {count_bnb}")
     # print(obj_bnb, obj_ilp)
     visualize_multicut_solution(graph, costs, pos, multicut_bnb, "BnB Multicut Result")
+
+    print(obj_bnb, obj_ilp)
+    assert abs(obj_bnb - obj_ilp) < 1e-6
+
+    # === Branch and Bound: benchmark both naive & tight ===
+    # benchmark_solver(graph, costs, log=True)  # Turn off detailed logging for clean output
 
 
 def benchmark(num_instances=1000, shape=(2, 3), tolerance=1e-6):
@@ -52,7 +54,6 @@ def benchmark(num_instances=1000, shape=(2, 3), tolerance=1e-6):
         multicut_ilp, obj_ilp = solver_ilp.solve()
         elapsed_ilp = time.time() - start_time
         print(f"ILP_multicut took {elapsed_ilp:.4f} seconds")
-        #
         # node_labeling_ilp = get_node_labeling(graph, multicut_ilp)
         # plot_multicut_result(graph, costs, pos, multicut_ilp, node_labeling_ilp, title="ILP Multicut Result")
 
@@ -62,6 +63,7 @@ def benchmark(num_instances=1000, shape=(2, 3), tolerance=1e-6):
         multicut_bnb, obj_bnb, count_bnb = solver_bnb.solve()
         elapsed_bnb = time.time() - start_time
         print(f"bnb_multicut took {elapsed_bnb:.4f} seconds")
+
         print(f"count_bnb: {count_bnb}")
         print(obj_bnb, obj_ilp)
         print(seed)
@@ -99,5 +101,5 @@ def run_cp_lib_instance():
 
 if __name__ == "__main__":
     main()  # for single test + visualization
-    # benchmark(num_instances=100, shape=(2, 3))  # for batch correctness check
+    # benchmark(num_instances=1000, shape=(3, 3))  # for batch correctness check
     # run_cp_lib_instance()

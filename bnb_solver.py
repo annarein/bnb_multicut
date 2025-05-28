@@ -4,7 +4,6 @@ import matplotlib.pyplot as plt
 import time
 
 
-
 def contract_and_merge_costs(graph: nx.Graph, costs: dict, a, b, cut_edges: dict, log=False):
     if not graph.has_node(a) or not graph.has_node(b):
         return None, None, None
@@ -60,12 +59,11 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
     """
     if log:
         print(f"[PROP_ZERO] Start propagate_zero_labels from edge ({u}, {v})")
-        print("  - Current cut_edges:")
-        for edge, label in sorted(cut_edges.items()):
-            print(f"    {edge}: {label}")
-        print("  - Current costs:")
-        for edge, value in sorted(costs.items()):
-            print(f"    {edge}: {value:.2f}")
+        print("  - Current cut_edges, costs:")
+        for edge in sorted(cut_edges):
+            label = cut_edges[edge]
+            cost_str = f",  cost: {costs[edge]:.2f}" if edge in costs else ""
+            print(f"    {edge}: {label}{cost_str}")
 
     # Step 1: Build adjacency map of all edges labeled as uncut (0)
     uncut_adj = {}
@@ -152,19 +150,19 @@ def print_edge_labels_inline(graph, cut_edges, obj, best_obj):
     print("  Edges: " + "  ".join(parts))
 
 
-def update_best_if_feasible(graph, cut_edges, obj, best, log=False):
-    if is_feasible_cut(graph, cut_edges):
-        if obj > best['obj']:
-            best['obj'] = obj
-            best['cut'] = cut_edges
-            best['count'] = 1
-            if log:
-                print(f"[UPDATE] New best obj = {obj:.2f}")
-                print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
-        elif obj == best['obj']:
-            best['count'] += 1
-            if log:
-                print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
+# def update_best_if_feasible(graph, cut_edges, obj, best, log=False):
+#     if is_feasible_cut(graph, cut_edges):
+#         if obj > best['obj']:
+#             best['obj'] = obj
+#             best['cut'] = cut_edges
+#             best['count'] = 1
+#             if log:
+#                 print(f"[UPDATE] New best obj = {obj:.2f}")
+#                 print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
+#         elif obj == best['obj']:
+#             best['count'] += 1
+#             if log:
+#                 print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
 
 
 def update_best_if_feasible_final(graph, cut_edges, obj, best, log=False):
@@ -177,8 +175,7 @@ def update_best_if_feasible_final(graph, cut_edges, obj, best, log=False):
                 print(f"[UPDATE] New best obj = {obj:.2f}")
                 print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
         elif obj == best['obj']:
-            best[
-                'cut'] = cut_edges  # 这是唯一的不一样，如果是obj最好， cut_edges 还是替换一下，为啥要换啊，因为如果之前存的临时的，可能所有边还没处理完？虽然 没处理完，但是obj肯定会越来越大，因为是正的，为啥要算作best呢
+            best['cut'] = cut_edges  # 这是唯一的不一样，如果是obj最好， cut_edges 还是替换一下，为啥要换啊，因为如果之前存的临时的，可能所有边还没处理完？虽然 没处理完，但是obj肯定会越来越大，因为是正的，为啥要算作best呢
             best['count'] += 1
             if log:
                 print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
@@ -268,7 +265,7 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
         for e in cut_edges_copy:
             if cut_edges_copy[e] == -1:
                 cut_edges_copy[e] = 1
-        update_best_if_feasible_final(graph, cut_edges_copy, obj, best)
+        update_best_if_feasible_final(graph, cut_edges_copy, obj, best, True)
         return None
 
     # Compute the optimistic bound (e.g., sum of remaining positive weights)
@@ -287,10 +284,10 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
         bound_trace.append((depth, bound, naive))
         print(f"\033[93m[BOUND] tighter = {bound:.2f}, naive = {naive:.2f}, Δ = {naive - bound:.2f}\033[0m")
 
-    if is_feasible_cut(graph, cut_edges):
-        update_best_if_feasible(graph, cut_edges.copy(), obj, best)
-    elif obj >= best['obj'] and log:
-        print(f"[Skipping infeasible cut] obj={obj:.2f}")
+    # if is_feasible_cut(graph, cut_edges):
+    #     update_best_if_feasible(graph, cut_edges.copy(), obj, best)
+    # elif obj >= best['obj'] and log:
+    #     print(f"[Skipping infeasible cut] obj={obj:.2f}")
 
     if obj + bound < best['obj']:
         if log:
