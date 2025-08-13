@@ -5,8 +5,10 @@ import time
 
 
 def contract_and_merge_costs(graph: nx.Graph, costs: dict, a, b, cut_edges: dict, log=False):
-    if not graph.has_node(a) or not graph.has_node(b):
-        return None, None, None
+    # if not graph.has_node(a) or not graph.has_node(b):  # why it's necessary now? I forgot why I wrote this
+    #     return None, None, None
+    assert graph.has_node(a) and graph.has_node(b), \
+        f"Edge ({a},{b}) not consistent with current graph."
 
     # Step 1: prepare new cut_edges
     new_cut_edges = cut_edges.copy()
@@ -150,21 +152,6 @@ def print_edge_labels_inline(graph, cut_edges, obj, best_obj):
     print("  Edges: " + "  ".join(parts))
 
 
-# def update_best_if_feasible(graph, cut_edges, obj, best, log=False):
-#     if is_feasible_cut(graph, cut_edges):
-#         if obj > best['obj']:
-#             best['obj'] = obj
-#             best['cut'] = cut_edges
-#             best['count'] = 1
-#             if log:
-#                 print(f"[UPDATE] New best obj = {obj:.2f}")
-#                 print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
-#         elif obj == best['obj']:
-#             best['count'] += 1
-#             if log:
-#                 print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
-
-
 def update_best_if_feasible_final(graph, cut_edges, obj, best, log=False):
     if is_feasible_cut(graph, cut_edges):
         if obj > best['obj']:
@@ -175,11 +162,24 @@ def update_best_if_feasible_final(graph, cut_edges, obj, best, log=False):
                 print(f"[UPDATE] New best obj = {obj:.2f}")
                 print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
         elif obj == best['obj']:
-            best['cut'] = cut_edges  # 这是唯一的不一样，如果是obj最好， cut_edges 还是替换一下，为啥要换啊，因为如果之前存的临时的，可能所有边还没处理完？虽然 没处理完，但是obj肯定会越来越大，因为是正的，为啥要算作best呢
+            best['cut'] = cut_edges  # 这是唯一的不一样，
+            # 如果是obj最好， cut_edges 还是替换一下，为啥要换啊，
+            # 因为如果之前存的临时的，可能所有边还没处理完？
+            # 虽然 没处理完，但是obj肯定会越来越大，因为是正的，为啥要算作best呢
             best['count'] += 1
             if log:
-                print(f"[TIE] Another feasible cut with obj = {obj:.2f}, total count = {best['count']}")
+                # 构造 clusters
+                g_copy = graph.copy()
+                edges_to_cut = [(u, v) for (u, v), val in cut_edges.items() if val == 1]
+                g_copy.remove_edges_from(edges_to_cut)
+                clusters = list(nx.connected_components(g_copy))
+                clusters_str = ' '.join(
+                    '{' + ','.join(str(node) for node in sorted(comp)) + '}' for comp in clusters
+                )
 
+                # 打印
+                print(
+                    f"[TIE] Another feasible cut with obj = {obj:.2f}, Clusters: {clusters_str}, total count = {best['count']}")
 
 bound_trace = []  # (depth, tighter_bound, naive_bound)
 
@@ -255,9 +255,11 @@ def print_edge_label_groups(cut_edges: dict, tag: str = ""):
     print(f"  undecided edges:{undecided}")
 
 
-def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=False, use_tight_bound=True, depth=0, node_counter=None):
+def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=False, use_tight_bound=True, depth=0,
+                 node_counter=None):
     if node_counter is not None:
         node_counter['count'] += 1  # 🔢 每次进入一个分支节点就 +1
+
     if not costs:
         if log:
             print(f"[NO COSTS] \033[92mcluster_obj={obj:.2f}\033[0m, best_obj={best['obj']:.2f}")
@@ -284,10 +286,6 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
         bound_trace.append((depth, bound, naive))
         print(f"\033[93m[BOUND] tighter = {bound:.2f}, naive = {naive:.2f}, Δ = {naive - bound:.2f}\033[0m")
 
-    # if is_feasible_cut(graph, cut_edges):
-    #     update_best_if_feasible(graph, cut_edges.copy(), obj, best)
-    # elif obj >= best['obj'] and log:
-    #     print(f"[Skipping infeasible cut] obj={obj:.2f}")
 
     if obj + bound < best['obj']:
         if log:
@@ -302,7 +300,7 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
     if log:
         print_edge_label_groups(cut_edges, f"before JOIN ({u},{v})")
     # ⬇️ Skip join if only one edge and max_cost <= 0
-    skip_join = (len(costs) == 1 and max_cost <= 0)
+    skip_join = max_cost < 0
     if skip_join:
         graph_join = None
     else:
@@ -316,7 +314,8 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
             # print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f} + delta_obj {delta_obj:.2f}")
             print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f}")
             print(f"  - New objective: {obj_join:.2f}")
-        bnb_multicut(graph_join, costs_join, cut_edges_join, obj_join, best, log, use_tight_bound, depth + 1, node_counter)
+        bnb_multicut(graph_join, costs_join, cut_edges_join, obj_join, best, log, use_tight_bound, depth + 1,
+                     node_counter)
         if log:
             print_edge_label_groups(cut_edges_join, f"after JOIN ({u},{v})")
 
@@ -383,7 +382,7 @@ class BnBSolver:
 
         start = time.time()
         bnb_multicut(
-            self.graph.copy(),
+            self.graph,
             normalized_costs,
             cut_edges,
             obj=0,

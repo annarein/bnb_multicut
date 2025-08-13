@@ -8,12 +8,12 @@ from visualizer import visualize_multicut_solution, plot_multicut_result
 
 def main():
     # graph, costs, pos = get_random_costs_graph(seed=53, shape=(4, 3))
-    # graph, costs, pos = get_test_zeros_graph(shape=(2, 2))
-    graph, costs, pos = get_random_costs_graph(seed=288, shape=(3, 3))
+    graph, costs, pos = get_test_zeros_graph(shape=(2, 2))
+    # graph, costs, pos = get_random_costs_graph(seed=288, shape=(3, 3))
     for u, v in graph.edges():
         print(u, v, costs[(u, v)])
     # Original graph visualization (optional)
-    # plot_multicut_result(graph, costs, pos, multicut=None, node_labeling=None, title="Original Graph")
+    plot_multicut_result(graph, costs, pos, multicut=None, node_labeling=None, title="Original Graph")
 
     # === ILP Solver ===
     solver_ilp = ILPSolver(graph.copy(), costs)
@@ -30,17 +30,16 @@ def main():
     elapsed_bnb = time.time() - start_time
     print(f"bnb_multicut took {elapsed_bnb:.4f} seconds")
     print(f"count_bnb: {count_bnb}")
-    # print(obj_bnb, obj_ilp)
     visualize_multicut_solution(graph, costs, pos, multicut_bnb, "BnB Multicut Result")
 
-    print(obj_bnb, obj_ilp)
+    # print(obj_bnb, obj_ilp)
     assert abs(obj_bnb - obj_ilp) < 1e-6
 
     # === Branch and Bound: benchmark both naive & tight ===
     # benchmark_solver(graph, costs, log=True)  # Turn off detailed logging for clean output
 
 
-def benchmark(num_instances=1000, shape=(2, 3), tolerance=1e-6):
+def benchmark(num_instances=1000, shape=(2, 2), tolerance=1e-6):
     for seed in range(num_instances):
         graph, costs, pos = get_random_costs_graph(seed=seed, shape=shape)
         # graph, costs, pos = get_test_zeros_graph()
@@ -67,6 +66,7 @@ def benchmark(num_instances=1000, shape=(2, 3), tolerance=1e-6):
         print(f"count_bnb: {count_bnb}")
         print(obj_bnb, obj_ilp)
         print(seed)
+        print("================")
         assert abs(obj_bnb - obj_ilp) < tolerance
 
         # node_labeling_bnb = get_node_labeling(graph, multicut_bnb)
@@ -101,5 +101,5 @@ def run_cp_lib_instance():
 
 if __name__ == "__main__":
     main()  # for single test + visualization
-    # benchmark(num_instances=1000, shape=(3, 3))  # for batch correctness check
+    # benchmark(num_instances=1000)  # for batch correctness check
     # run_cp_lib_instance()
