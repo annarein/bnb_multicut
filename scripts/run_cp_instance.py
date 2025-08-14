@@ -30,7 +30,7 @@ def print_clusters(title, clusters):
 def run_cp_instance():
     graph, costs = load_cp_lib_instance(INSTANCE_PATH)
 
-    bnb = BnBSolver(graph.copy(), costs)
+    bnb = BnBSolver(graph.copy(), costs, False, False)
     multicut, obj_bnb, count = bnb.solve()
     print(f"[BnB] obj = {obj_bnb}, nodes = {count}")
 

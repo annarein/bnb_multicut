@@ -8,11 +8,12 @@ def run_benchmark(num_instances=300, shape=(5, 3), tolerance=1e-6):
         ilp = ILPSolver(graph.copy(), costs)
         _, obj_ilp = ilp.solve()
 
-        bnb = BnBSolver(graph.copy(), costs)
+        bnb = BnBSolver(graph.copy(), costs, False, False)
         _, obj_bnb, _ = bnb.solve()
 
         print(f"[{seed}] ILP = {obj_ilp}, BnB = {obj_bnb}")
         assert abs(obj_bnb - obj_ilp) < tolerance
+        print("====================================================================")
 
 if __name__ == "__main__":
     run_benchmark()

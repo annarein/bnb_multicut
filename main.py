@@ -7,9 +7,9 @@ from visualizer import visualize_multicut_solution, plot_multicut_result
 
 
 def main():
-    # graph, costs, pos = get_random_costs_graph(seed=53, shape=(4, 3))
-    graph, costs, pos = get_test_zeros_graph(shape=(2, 2))
-    # graph, costs, pos = get_random_costs_graph(seed=288, shape=(3, 3))
+    graph, costs, pos = get_random_costs_graph(seed=53, shape=(4, 3))
+    # graph, costs, pos = get_test_zeros_graph(shape=(2, 2))
+    # graph, costs, pos = get_random_costs_graph(seed=288, shape=(7, 9))
     for u, v in graph.edges():
         print(u, v, costs[(u, v)])
     # Original graph visualization (optional)
@@ -24,7 +24,7 @@ def main():
     visualize_multicut_solution(graph, costs, pos, multicut_ilp, "ILP Multicut Result")
 
     # === Branch and Bound Solver ===
-    solver_bnb = BnBSolver(graph.copy(), costs, False)
+    solver_bnb = BnBSolver(graph.copy(), costs, False, True)
     start_time = time.time()
     multicut_bnb, obj_bnb, count_bnb = solver_bnb.solve()
     elapsed_bnb = time.time() - start_time
@@ -32,14 +32,14 @@ def main():
     print(f"count_bnb: {count_bnb}")
     visualize_multicut_solution(graph, costs, pos, multicut_bnb, "BnB Multicut Result")
 
-    # print(obj_bnb, obj_ilp)
+    print(f"obj_bnb: {obj_bnb}, obj_ilp: {obj_ilp}")
     assert abs(obj_bnb - obj_ilp) < 1e-6
 
     # === Branch and Bound: benchmark both naive & tight ===
     # benchmark_solver(graph, costs, log=True)  # Turn off detailed logging for clean output
 
 
-def benchmark(num_instances=1000, shape=(2, 2), tolerance=1e-6):
+def benchmark(num_instances=1000, shape=(3, 4), tolerance=1e-6):
     for seed in range(num_instances):
         graph, costs, pos = get_random_costs_graph(seed=seed, shape=shape)
         # graph, costs, pos = get_test_zeros_graph()
@@ -57,7 +57,7 @@ def benchmark(num_instances=1000, shape=(2, 2), tolerance=1e-6):
         # plot_multicut_result(graph, costs, pos, multicut_ilp, node_labeling_ilp, title="ILP Multicut Result")
 
         # === Branch and Bound Solver ===
-        solver_bnb = BnBSolver(graph.copy(), costs)
+        solver_bnb = BnBSolver(graph.copy(), costs, False, True)
         start_time = time.time()
         multicut_bnb, obj_bnb, count_bnb = solver_bnb.solve()
         elapsed_bnb = time.time() - start_time
@@ -100,6 +100,6 @@ def run_cp_lib_instance():
 
 
 if __name__ == "__main__":
-    main()  # for single test + visualization
-    # benchmark(num_instances=1000)  # for batch correctness check
+    # main()  # for single test + visualization
+    benchmark(num_instances=1000)  # for batch correctness check
     # run_cp_lib_instance()

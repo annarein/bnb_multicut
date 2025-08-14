@@ -13,7 +13,7 @@ def run_demo():
     print(f"[ILP] obj = {obj_ilp}")
     visualize_multicut_solution(graph, costs, pos, multicut_ilp, "ILP Multicut")
 
-    bnb = BnBSolver(graph.copy(), costs)
+    bnb = BnBSolver(graph.copy(), costs, False, False)
     multicut_bnb, obj_bnb, count = bnb.solve()
     print(f"[BnB] obj = {obj_bnb}, nodes = {count}")
     visualize_multicut_solution(graph, costs, pos, multicut_bnb, "BnB Multicut")
