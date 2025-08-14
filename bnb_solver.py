@@ -152,15 +152,15 @@ def print_edge_labels_inline(graph, cut_edges, obj, best_obj):
     print("  Edges: " + "  ".join(parts))
 
 
-def update_best_if_feasible_final(graph, cut_edges, obj, best, log=False):
-    if is_feasible_cut(graph, cut_edges):
+def update_best_if_feasible_final(orig_graph, cut_edges, obj, best, log=False):
+    if is_feasible_cut(orig_graph, cut_edges):
         if obj > best['obj']:
             best['obj'] = obj
             best['cut'] = cut_edges
             best['count'] = 1
             if log:
                 print(f"[UPDATE] New best obj = {obj:.2f}")
-                print_edge_labels_inline(graph, cut_edges, obj, best['obj'])
+                print_edge_labels_inline(orig_graph, cut_edges, obj, best['obj'])
         elif obj == best['obj']:
             best['cut'] = cut_edges  # 这是唯一的不一样，
             # 如果是obj最好， cut_edges 还是替换一下，为啥要换啊，
@@ -169,7 +169,7 @@ def update_best_if_feasible_final(graph, cut_edges, obj, best, log=False):
             best['count'] += 1
             if log:
                 # 构造 clusters
-                g_copy = graph.copy()
+                g_copy = orig_graph.copy()
                 edges_to_cut = [(u, v) for (u, v), val in cut_edges.items() if val == 1]
                 g_copy.remove_edges_from(edges_to_cut)
                 clusters = list(nx.connected_components(g_copy))
@@ -255,8 +255,18 @@ def print_edge_label_groups(cut_edges: dict, tag: str = ""):
     print(f"  undecided edges:{undecided}")
 
 
-def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=False, use_tight_bound=True, depth=0,
-                 node_counter=None):
+def bnb_multicut(
+        graph: nx.Graph,
+        costs: dict,
+        cut_edges: dict,
+        obj: float,
+        best: dict,
+        log: bool,
+        use_tight_bound: bool = True,
+        depth: int = 0,
+        node_counter=None,
+        orig_graph=None):
+
     if node_counter is not None:
         node_counter['count'] += 1  # 🔢 每次进入一个分支节点就 +1
 
@@ -267,7 +277,7 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
         for e in cut_edges_copy:
             if cut_edges_copy[e] == -1:
                 cut_edges_copy[e] = 1
-        update_best_if_feasible_final(graph, cut_edges_copy, obj, best, True)
+        update_best_if_feasible_final(orig_graph, cut_edges_copy, obj, best, True)
         return None
 
     # Compute the optimistic bound (e.g., sum of remaining positive weights)
@@ -285,7 +295,6 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
         naive = sum(w for e, w in costs.items() if w > 0 and e in graph.edges and cut_edges.get(e, -1) != 1)
         bound_trace.append((depth, bound, naive))
         print(f"\033[93m[BOUND] tighter = {bound:.2f}, naive = {naive:.2f}, Δ = {naive - bound:.2f}\033[0m")
-
 
     if obj + bound < best['obj']:
         if log:
@@ -315,7 +324,7 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
             print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f}")
             print(f"  - New objective: {obj_join:.2f}")
         bnb_multicut(graph_join, costs_join, cut_edges_join, obj_join, best, log, use_tight_bound, depth + 1,
-                     node_counter)
+                     node_counter, orig_graph)
         if log:
             print_edge_label_groups(cut_edges_join, f"after JOIN ({u},{v})")
 
@@ -329,7 +338,7 @@ def bnb_multicut(graph: nx.Graph, costs: dict, cut_edges, obj, best: dict, log=F
     cut_edges_cut[edge_key] = 1
     if log:
         print(f"[BRANCH] Cut: removing edge {edge_key} with cost {max_cost:.2f}, Objective unchanged: {obj:.2f}")
-    bnb_multicut(graph_cut, costs_cut, cut_edges_cut, obj, best, log, use_tight_bound, depth + 1, node_counter)
+    bnb_multicut(graph_cut, costs_cut, cut_edges_cut, obj, best, log, use_tight_bound, depth + 1, node_counter, orig_graph)
     if log:
         print_edge_label_groups(cut_edges_cut, f"after CUT ({u},{v})")
 
@@ -356,7 +365,7 @@ def benchmark_solver(graph, costs, log=False):
 
 
 class BnBSolver:
-    def __init__(self, graph, costs, log=False, use_tight_bound=True):
+    def __init__(self, graph, costs, log: bool = True, use_tight_bound: bool = True):
         self.graph = graph
         self.costs = costs
         self.log = log
@@ -366,7 +375,7 @@ class BnBSolver:
         if self.log:
             print(f"graph for bnb solver:")
         # normalized_costs = {
-        #     (min(u, v), max(u, v)): w
+        #     min(u, v), max(u, v)): w
         #     for (u, v), w in self.costs.items()
         # }
         normalized_costs = {}
@@ -389,7 +398,8 @@ class BnBSolver:
             best=best,
             log=self.log,
             use_tight_bound=self.use_tight_bound,
-            node_counter=node_counter
+            node_counter=node_counter,
+            orig_graph=self.graph
         )
         end = time.time()
 
