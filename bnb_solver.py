@@ -4,77 +4,109 @@ import matplotlib.pyplot as plt
 import time
 from typing import Dict, Tuple, List, Optional, TypedDict
 
-# ---- Type Aliases (for readability, not logic) ----
+"""
+Multicut Branch-and-Bound (maximization form)
+
+Edge labels in `CutMap`:
+  1 = cut (different clusters)
+  0 = uncut (same cluster)
+ -1 = undecided
+
+Objective:
+  maximize sum of positive edge weights kept (or equivalently,
+  maximize total gain from JOIN decisions). Upper bounds are
+  computed via dual-feasible iterative cycle packing (ICP)
+  over conflicted cycles (1 negative + positive path).
+
+References for terminology and feasibility:
+  - Minimum cost multicut / correlation clustering: see standard definitions.
+  - Conflicted cycles & dual packing intuition: aligns with cycle-cover relaxations.
+"""
+
+# ---------- Type aliases ----------
 Edge = Tuple[int, int]
 CostMap = Dict[Edge, float]
 CutMap = Dict[Edge, int]
 
 class Best(TypedDict, total=False):
+    """Container for the incumbent."""
     obj: float
     cut: CutMap
     count: int
-    path: List[str]     # NEW: Record the JOIN/CUT path for generating clusters
+    path: List[str]  # JOIN/CUT sequence from root to incumbent
 
 
-def contract_and_merge_costs(graph: nx.Graph, costs: CostMap, a: int, b: int, cut_edges: CutMap, log: bool = False):
+# ---------- Graph update / feasibility helpers ----------
+
+def contract_and_merge_costs(
+    graph: nx.Graph,
+    costs: CostMap,
+    a: int,
+    b: int,
+    cut_edges: CutMap,
+    log: bool = False
+):
+    """
+    Contract nodes a,b; merge incident edge costs onto (a,·);
+    inherit cut labels: if (b,c) was cut, then (a,c) becomes cut.
+
+    Returns: (new_graph, new_costs, new_cut_edges)
+    """
     assert graph.has_node(a) and graph.has_node(b), \
         f"Edge ({a},{b}) not consistent with current graph."
 
-    # Step 1: Prepare new cut_edges
+    # Cut labels after merge
     new_cut_edges = cut_edges.copy()
-
-    neighbors = set(graph.neighbors(a)).union(graph.neighbors(b))
-    neighbors.discard(a)
-    neighbors.discard(b)
-
+    neighbors = set(graph.neighbors(a)).union(graph.neighbors(b)) - {a, b}
     for c in neighbors:
         key_ac = (min(a, c), max(a, c))
         key_bc = (min(b, c), max(b, c))
-        cut_bc = cut_edges.get(key_bc, -1)
-        if cut_bc == 1:
+        if cut_edges.get(key_bc, -1) == 1:
             new_cut_edges[key_ac] = 1
 
-    # Step 2: Prepare new_costs BEFORE merge
+    # Costs after merge (sum on parallel edges)
     new_costs: CostMap = {}
     touched = set()
-
     for c in neighbors:
         key_ac = (min(a, c), max(a, c))
         key_bc = (min(b, c), max(b, c))
-        cost_a = costs.get(key_ac, 0.0)
-        cost_b = costs.get(key_bc, 0.0)
-        new_costs[key_ac] = cost_a + cost_b
+        new_costs[key_ac] = costs.get(key_ac, 0.0) + costs.get(key_bc, 0.0)
         touched.add(key_ac)
 
-    # Keep other costs unchanged
+    # Keep other costs unchanged (skip edges incident to b)
     for (u, v), w in costs.items():
         key = (min(u, v), max(u, v))
         if key not in touched and b not in key:
             new_costs[key] = w
 
-    # Step 3: Merge
+    # Perform contraction
     new_graph = nx.contracted_nodes(graph, a, b, self_loops=False)
-
     return new_graph, new_costs, new_cut_edges
 
 
-def propagate_zero_labels(cut_edges: CutMap, u: int, v: int, costs: CostMap, log: bool = False) -> CutMap:
+def propagate_zero_labels(
+    cut_edges: CutMap,
+    u: int,
+    v: int,
+    costs: CostMap,
+    log: bool = False
+) -> CutMap:
+    """
+    Propagate label 0 (uncut) inside the connected subgraph
+    formed by edges already labeled 0. Any undecided pair
+    connected by a 0-labeled path becomes 0.
+    """
     if log:
         print(f"[PROP_ZERO] Start propagate_zero_labels from edge ({u}, {v})")
-        print("  - Current cut_edges, costs:")
-        for edge in sorted(cut_edges):
-            label = cut_edges[edge]
-            cost_str = f",  cost: {costs[edge]:.2f}" if edge in costs else ""
-            print(f"    {edge}: {label}{cost_str}")
 
-    # Step 1: Build adjacency map of all edges labeled as uncut (0)
+    # Build adjacency from label-0 edges
     uncut_adj: Dict[int, set] = {}
     for (a, b), val in cut_edges.items():
         if val == 0:
             uncut_adj.setdefault(a, set()).add(b)
             uncut_adj.setdefault(b, set()).add(a)
 
-    # Step 2: BFS to find all nodes reachable via uncut edges
+    # BFS from {u,v} on 0-labeled edges
     visited: set = set()
     queue = deque([u, v])
     while queue:
@@ -82,55 +114,61 @@ def propagate_zero_labels(cut_edges: CutMap, u: int, v: int, costs: CostMap, log
         if node in visited:
             continue
         visited.add(node)
-        for neighbor in uncut_adj.get(node, []):
-            if neighbor not in visited:
-                queue.append(neighbor)
+        queue.extend(n for n in uncut_adj.get(node, []) if n not in visited)
 
-    # Step 3: For each pair of visited nodes, propagate 0-label if edge was undecided
+    # Close under transitivity: mark undecided pairs among visited as 0
     visited_list = list(visited)
     for i in range(len(visited_list)):
         for j in range(i + 1, len(visited_list)):
             n1, n2 = visited_list[i], visited_list[j]
-            edge = (min(n1, n2), max(n1, n2))
-            if edge in cut_edges and cut_edges[edge] == -1:
-                cut_edges[edge] = 0
+            e = (min(n1, n2), max(n1, n2))
+            if e in cut_edges and cut_edges[e] == -1:
+                cut_edges[e] = 0
                 if log:
-                    found = "FOUND" if edge in costs else "NOT FOUND"
-                    value = costs.get(edge, 0.0)
-                    print(f"\033[96m  Propagate 0-label: edge {edge} with cost {value:.2f} ({found})\033[0m")
+                    value = costs.get(e, 0.0)
+                    print(f"\033[96m  Propagate 0-label: edge {e} (cost {value:.2f})\033[0m")
     return cut_edges
 
 
-def is_feasible_cut(graph: nx.Graph, cut_edges: CutMap, verbose: bool = False) -> bool:
-    # 1. Only process edges from the original graph
+def is_feasible_cut(
+    graph: nx.Graph,
+    cut_edges: CutMap,
+    verbose: bool = False
+) -> bool:
+    """
+    Check multicut feasibility: removing edges with label 1
+    must separate their endpoints into different components.
+    """
     edges_to_cut = []
     for u, v in graph.edges:
         if cut_edges.get((u, v), 0) == 1 or cut_edges.get((v, u), 0) == 1:
             edges_to_cut.append((u, v))
 
-    # 2. Copy graph, remove those edges
     g_copy = graph.copy()
     g_copy.remove_edges_from(edges_to_cut)
 
-    # 3. Assign a connected component label to each node
-    components = list(nx.connected_components(g_copy))
+    # Component map
     label: Dict[int, int] = {}
-    for idx, comp in enumerate(components):
+    for idx, comp in enumerate(nx.connected_components(g_copy)):
         for node in comp:
             label[node] = idx
 
-    # 4. Check that all cut edges are actually across components
+    # Any cut edge whose endpoints stay connected → infeasible
     for u, v in edges_to_cut:
         if label[u] == label[v]:
             if verbose:
-                print(f"Edge ({u}, {v}) is cut but endpoints are still in same component.")
+                print(f"Edge ({u}, {v}) is cut but endpoints remain connected.")
             return False
-
-    # 5. All cut edges successfully disconnect components
     return True
 
 
-def print_edge_labels_inline(graph: nx.Graph, cut_edges: CutMap, obj: float, best_obj: float) -> None:
+def print_edge_labels_inline(
+    graph: nx.Graph,
+    cut_edges: CutMap,
+    obj: float,
+    best_obj: float
+) -> None:
+    """Color-coded inline dump of edge labels and current objective."""
     RED = "\033[91m"
     GREEN = "\033[92m"
     RESET = "\033[0m"
@@ -145,7 +183,7 @@ def print_edge_labels_inline(graph: nx.Graph, cut_edges: CutMap, obj: float, bes
         elif label == 0:
             parts.append(f"{GREEN}{e}{RESET}")
         else:
-            parts.append(f"{e}")  # Undecided = default color
+            parts.append(f"{e}")
     print("  Edges: " + "  ".join(parts))
 
 
@@ -158,13 +196,14 @@ def update_best_if_feasible_final(
     path: Optional[List[str]] = None
 ) -> None:
     """
-    New param `path`: Print and store the JOIN/CUT decision sequence from root to current solution.
+    If the proposed labeling is feasible, update the incumbent and
+    record the resulting clusters and decision path.
     """
     if is_feasible_cut(orig_graph, cut_edges):
-        # Build clusters string
         g_copy = orig_graph.copy()
         edges_to_cut = [(u, v) for (u, v), val in cut_edges.items() if val == 1]
         g_copy.remove_edges_from(edges_to_cut)
+
         clusters = list(nx.connected_components(g_copy))
         clusters_str = ' '.join(
             '{' + ','.join(str(node) for node in sorted(comp)) + '}' for comp in clusters
@@ -181,7 +220,6 @@ def update_best_if_feasible_final(
                 print(f"        Clusters: {clusters_str}")
                 print(f"        Path:     {path_str}")
         elif obj == best.get('obj', 0.0):
-            # For ties, also update path for tracking
             best['cut'] = cut_edges
             best['count'] = best.get('count', 0) + 1
             best['path'] = list(path or ["Start"])
@@ -193,44 +231,9 @@ def update_best_if_feasible_final(
                 )
 
 
-bound_trace: List[Tuple[int, float, float]] = []  # (depth, tighter_bound, naive_bound)
+# ---------- Dual-tightened upper bound (ICP-style) ----------
 
-
-# def compute_tight_upper_bound(graph: nx.Graph, costs: CostMap, cut_edges: CutMap, max_cycle_length: int = 6) -> float:
-#     graph_edges = set(graph.edges())
-#     E_plus = {e for e, w in costs.items() if w > 0 and e in graph_edges and cut_edges.get(e, -1) != 1}
-#     E_minus = {e for e, w in costs.items() if w < 0 and e in graph_edges and cut_edges.get(e, -1) != 1}
-#     G_plus = graph.edge_subgraph(E_plus).copy()
-#
-#     conflicted_cycles: List[List[Edge]] = []
-#     for (u, v) in E_minus:
-#         if u not in G_plus or v not in G_plus:
-#             continue
-#         try:
-#             path = nx.shortest_path(G_plus, u, v)
-#             if len(path) + 1 <= max_cycle_length:
-#                 cycle_edges = [(min(path[i], path[i + 1]), max(path[i], path[i + 1])) for i in range(len(path) - 1)]
-#                 rep_edge = (min(u, v), max(u, v))
-#                 cycle_edges.append(rep_edge)
-#                 if rep_edge in graph_edges and cut_edges.get(rep_edge, -1) != 1:
-#                     conflicted_cycles.append(cycle_edges)
-#         except (nx.NetworkXNoPath, nx.NodeNotFound):
-#             continue
-#
-#     used_edges: set = set()
-#     reduce_total = 0.0
-#     for cycle in sorted(conflicted_cycles, key=lambda cyc: len(cyc)):
-#         if any(e in used_edges or cut_edges.get(e, -1) == 1 or e not in graph_edges for e in cycle):
-#             continue
-#         pos_edges = [e for e in cycle if e in E_plus and cut_edges.get(e, -1) != 1 and e in graph_edges]
-#         if not pos_edges:
-#             continue
-#         delta = min(costs[e] for e in pos_edges)
-#         reduce_total += delta
-#         used_edges.update(cycle)
-#
-#     naive_upper_bound = sum(w for e, w in costs.items() if w > 0 and e in graph_edges and cut_edges.get(e, -1) != 1)
-#     return naive_upper_bound - reduce_total
+bound_trace: List[Tuple[int, float, float]] = []  # (depth, tight_bound, naive_bound)
 
 def compute_tight_upper_bound(
     graph: nx.Graph,
@@ -239,71 +242,62 @@ def compute_tight_upper_bound(
     max_cycle_length: int = 6
 ) -> float:
     """
-    Safe tighter upper bound for the maximization BnB.
-    Implements a dual-feasible iterative cycle packing (ICP)
-    over conflicted cycles (one negative edge + a positive path).
-    The reduction 'reduce_total' is the sum of packed y_C and
-    is guaranteed not to exceed residual capacities on *any* edge
-    (including the negative edge), so pruning stays correct.
+    Dual-feasible tightening via iterative packing of conflicted cycles.
+    A conflicted cycle = one negative edge + a positive path between its endpoints.
 
-    Upper bound = naive_positive_sum - reduce_total, clamped at 0.
+    We maintain residual capacities cap[e] = |costs[e]| for both signs.
+    For each cycle, increase its dual y by min cap on the cycle; subtract from caps.
+    Removing depleted positive edges from G_plus prevents reuse. This is a valid
+    dual ascent; reduce_total = sum y never exceeds any edge capacity.
+
+    Returned bound:
+      naive_positive_sum - reduce_total, clamped at 0.
     """
+    # Edges alive in the current node (and not fixed to CUT=1)
+    graph_edges = {(min(u, v), max(u, v)) for (u, v) in graph.edges()}
+    undecided = {e for e in graph_edges if cut_edges.get(e, -1) != 1}
 
-    # --- Only edges that still exist in the current graph and are not fixed to CUT(=1)
-    graph_edges = { (min(u, v), max(u, v)) for (u, v) in graph.edges() }
-    undecided = { e for e in graph_edges if cut_edges.get(e, -1) != 1 }
+    E_plus  = {e for e in undecided if costs.get(e, 0.0) > 0.0}
+    E_minus = {e for e in undecided if costs.get(e, 0.0) < 0.0}
 
-    # Positive/negative edges available at this node
-    E_plus  = { e for e in undecided if costs.get(e, 0.0) > 0.0 }
-    E_minus = { e for e in undecided if costs.get(e, 0.0) < 0.0 }
+    # Residual capacities in the dual
+    cap: Dict[Edge, float] = {e: abs(costs[e]) for e in (E_plus | E_minus)}
 
-    # --- Residual capacities for the dual (absolute costs) on *both* signs
-    cap: Dict[Edge, float] = { e: abs(costs[e]) for e in (E_plus | E_minus) }
-
-    # G_plus only contains positive edges with residual capacity > 0
+    # Positive-edge subgraph with capacity>0
     def build_G_plus():
-        pos_edges_alive = [ (u, v) for (u, v) in E_plus if cap.get((min(u, v), max(u, v)), 0.0) > 0.0 ]
+        pos_edges_alive = [(u, v) for (u, v) in E_plus if cap.get((min(u, v), max(u, v)), 0.0) > 0.0]
         return graph.edge_subgraph(pos_edges_alive).copy()
 
     G_plus = build_G_plus()
-
     reduce_total = 0.0
 
-    # --- Iteratively pack conflicted cycles (short positive paths + 1 negative edge)
     improved = True
     while improved:
         improved = False
 
-        # Iterate over negative edges that still have residual capacity
+        # Try to pack cycles per negative edge
         for (u, v) in list(E_minus):
             rep = (min(u, v), max(u, v))
             if cap.get(rep, 0.0) <= 0.0:
                 continue
-
-            # Both endpoints must be present in the current positive subgraph
             if (u not in G_plus) or (v not in G_plus):
                 continue
 
-            # Find a shortest path in G_plus between u and v
+            # Shortest positive path (hop distance) u→v
             try:
                 path = nx.shortest_path(G_plus, source=u, target=v)
             except (nx.NetworkXNoPath, nx.NodeNotFound):
                 continue
 
-            # Path length in edges
             plen = len(path) - 1
-            if plen <= 0:
+            if plen <= 0 or plen + 1 > max_cycle_length:
                 continue
 
-            # Cycle length = path edges + 1 (the negative edge)
-            if plen + 1 > max_cycle_length:
-                continue
-
-            # Collect cycle edges (all must be positive with residual capacity)
+            # Collect positive path edges (must have residual capacity)
             cycle: List[Edge] = []
             feasible = True
             for i in range(plen):
-                a, b = path[i], path[i+1]
+                a, b = path[i], path[i + 1]
                 ekey = (min(a, b), max(a, b))
                 if ekey not in E_plus or cap.get(ekey, 0.0) <= 0.0:
                     feasible = False
@@ -312,18 +306,16 @@ def compute_tight_upper_bound(
             if not feasible:
                 continue
 
-            # Add the single negative edge to complete the conflicted cycle
+            # Add the negative edge to complete the cycle
             cycle.append(rep)
 
-            # Dual increment is limited by the minimum residual capacity across *all* edges in the cycle
+            # Dual step
             y = min(cap[e] for e in cycle)
             if y <= 0.0:
                 continue
 
-            # Apply: deduct y from residual capacity of every edge in the cycle
             for e in cycle:
                 cap[e] -= y
-                # If a positive edge is depleted, remove it from G_plus so future paths avoid it
                 if e in E_plus and cap[e] <= 0.0:
                     a, b = e
                     if G_plus.has_edge(a, b):
@@ -332,21 +324,15 @@ def compute_tight_upper_bound(
             reduce_total += y
             improved = True
 
-        # Optional: if we removed many positive edges, G_plus is already up-to-date (we remove on the fly)
-
-    # Naive upper bound: sum of positive costs still present and not fixed to CUT
     naive_upper_bound = sum(costs[e] for e in E_plus)
-
-    # Safe tightened bound (never below 0)
-    bound = naive_upper_bound - reduce_total
-    if bound < 0.0:
-        bound = 0.0
-
+    bound = max(0.0, naive_upper_bound - reduce_total)
     return bound
 
 
+# ---------- Utilities for visualization and debug ----------
 
 def plot_bound_trace():
+    """Plot tight vs naive bound along the explored depths (then clear the trace)."""
     if not bound_trace:
         print("[WARN] No bound trace to plot.")
         return
@@ -361,15 +347,12 @@ def plot_bound_trace():
     plt.grid(True)
     plt.tight_layout()
     plt.show()
-    # 🔧 Clear after plotting
     bound_trace.clear()
 
 
 def print_edge_label_groups(cut_edges: CutMap, tag: str = ""):
-    RED = "\033[91m"
-    GREEN = "\033[92m"
-    RESET = "\033[0m"
-
+    """Grouped dump of labeled edge sets (cut / uncut / undecided)."""
+    RED, GREEN, RESET = "\033[91m", "\033[92m", "\033[0m"
     cut = {e for e, v in cut_edges.items() if v == 1}
     uncut = {e for e, v in cut_edges.items() if v == 0}
     undecided = {e for e, v in cut_edges.items() if v == -1}
@@ -380,85 +363,92 @@ def print_edge_label_groups(cut_edges: CutMap, tag: str = ""):
     print(f"  undecided edges:{undecided}")
 
 
-def bnb_multicut(
-        graph: nx.Graph,
-        costs: CostMap,
-        cut_edges: CutMap,
-        obj: float,
-        best: Best,
-        log: bool,
-        use_tight_bound: bool = True,
-        depth: int = 0,
-        node_counter: Optional[Dict[str, int]] = None,
-        orig_graph: Optional[nx.Graph] = None,
-        path: Optional[List[str]] = None):
+# ---------- Branch-and-Bound ----------
 
+def bnb_multicut(
+    graph: nx.Graph,
+    costs: CostMap,
+    cut_edges: CutMap,
+    obj: float,
+    best: Best,
+    log: bool,
+    use_tight_bound: bool = True,
+    depth: int = 0,
+    node_counter: Optional[Dict[str, int]] = None,
+    orig_graph: Optional[nx.Graph] = None,
+    path: Optional[List[str]] = None
+):
+    """
+    Depth-first BnB. Branch on the current highest-cost edge:
+      JOIN: contract endpoints (label 0), add its cost to obj.
+      CUT:  remove the edge (label 1), obj unchanged.
+    Prune if obj + UB < incumbent.
+    """
     if node_counter is not None:
-        node_counter['count'] += 1  # 🔢 每次进入一个分支节点就 +1
+        node_counter['count'] += 1
 
     if path is None:
         path = ["Start"]
 
+    # Leaf: no costs to consider → finalize by cutting undecided edges
     if not costs:
         if log:
             print(f"[NO COSTS] \033[92mcluster_obj={obj:.2f}\033[0m, best_obj={best.get('obj', 0.0):.2f}")
-        cut_edges_copy = cut_edges.copy()
-        for e in cut_edges_copy:
-            if cut_edges_copy[e] == -1:
-                cut_edges_copy[e] = 1
-        # ➕ 传入 path
+        cut_edges_copy = {k: (1 if v == -1 else v) for k, v in cut_edges.items()}
         update_best_if_feasible_final(orig_graph, cut_edges_copy, obj, best, True, path)
         return None
 
-    # Compute the optimistic bound
+    # Upper bound: tight (ICP-style) or naive
     if use_tight_bound:
         bound = compute_tight_upper_bound(graph, costs, cut_edges)
     else:
         graph_edges = set(graph.edges())
-        bound = sum(w for e, w in costs.items() if w > 0 and e in graph_edges and cut_edges.get(e, -1) != 1)
+        bound = sum(
+            w for e, w in costs.items()
+            if w > 0 and e in graph_edges and cut_edges.get(e, -1) != 1
+        )
 
     if log:
-        print(
-            f"[ENTER BnB] \033[92mcluster_obj={obj:.2f}\033[0m, \033[91mbound={bound:.2f}\033[0m, best_obj={best.get('obj', 0.0):.2f}")
-        naive = sum(w for e, w in costs.items() if w > 0 and e in graph.edges and cut_edges.get(e, -1) != 1)
+        print(f"[ENTER BnB] \033[92mcluster_obj={obj:.2f}\033[0m, "
+              f"\033[91mbound={bound:.2f}\033[0m, best_obj={best.get('obj', 0.0):.2f}")
+        naive = sum(
+            w for e, w in costs.items()
+            if w > 0 and e in graph.edges and cut_edges.get(e, -1) != 1
+        )
         bound_trace.append((depth, bound, naive))
         print(f"\033[93m[BOUND] tighter = {bound:.2f}, naive = {naive:.2f}, Δ = {naive - bound:.2f}\033[0m")
 
     if obj + bound < best.get('obj', 0.0):
         if log:
-            print(f"[PRUNE] Max possible obj = {obj + bound:.2f} < best obj = {best.get('obj', 0.0):.2f} → prune branch")
+            print(f"[PRUNE] Max possible obj = {obj + bound:.2f} < best obj = {best.get('obj', 0.0):.2f}")
         return None
 
+    # Pick edge with maximum current cost (ties arbitrary)
     edge, max_cost = max(costs.items(), key=lambda item: item[1])
-    # edge, max_cost = max( //maximum cost edge of current graph
-    #     ((e, costs[e]) for e in graph.edges() if e in costs),
-    #     key=lambda item: item[1]
-    # )
     u, v = edge
     edge_key = (min(u, v), max(u, v))
 
-    # Join branch
+    # JOIN branch (only when gain is non-negative)
     if log:
         print_edge_label_groups(cut_edges, f"before JOIN ({u},{v})")
     skip_join = max_cost < 0
-    if skip_join:
-        graph_join = None
-    else:
+    if not skip_join:
         graph_join, costs_join, cut_edges_join = contract_and_merge_costs(graph, costs, u, v, cut_edges, log=log)
-    if graph_join is not None:
         cut_edges_join[edge_key] = 0
         cut_edges_join = propagate_zero_labels(cut_edges_join, u, v, costs, log)
         obj_join = obj + max_cost
         if log:
             print(f"[BRANCH] Join: merging ({u}, {v}) with cost {max_cost:.2f}")
             print(f"  - New objective: {obj_join:.2f}")
-        # ➕ 路径增加 JOIN
-        bnb_multicut(graph_join, costs_join, cut_edges_join, obj_join, best, log, use_tight_bound, depth + 1,
-                     node_counter, orig_graph, path + [f"JOIN({u},{v})"])
+        bnb_multicut(
+            graph_join, costs_join, cut_edges_join, obj_join, best, log,
+            use_tight_bound, depth + 1, node_counter, orig_graph,
+            path + [f"JOIN({u},{v})"]
+        )
         if log:
             print_edge_label_groups(cut_edges_join, f"after JOIN ({u},{v})")
 
-    # Cut branch
+    # CUT branch
     if log:
         print_edge_label_groups(cut_edges, f"before CUT ({u},{v})")
     graph_cut = graph.copy()
@@ -468,14 +458,22 @@ def bnb_multicut(
     cut_edges_cut[edge_key] = 1
     if log:
         print(f"[BRANCH] Cut: removing edge {edge_key} with cost {max_cost:.2f}, Objective unchanged: {obj:.2f}")
-    # ➕ 路径增加 CUT
-    bnb_multicut(graph_cut, costs_cut, cut_edges_cut, obj, best, log, use_tight_bound, depth + 1,
-                 node_counter, orig_graph, path + [f"CUT({u},{v})"])
+    bnb_multicut(
+        graph_cut, costs_cut, cut_edges_cut, obj, best, log,
+        use_tight_bound, depth + 1, node_counter, orig_graph,
+        path + [f"CUT({u},{v})"]
+    )
     if log:
         print_edge_label_groups(cut_edges_cut, f"after CUT ({u},{v})")
 
 
+# ---------- Bench + solver wrapper ----------
+
 def benchmark_solver(graph: nx.Graph, costs: CostMap, log: bool = False):
+    """
+    Compare naive-vs-tight upper bounds on the same instance.
+    Reports objective, runtime, and explored nodes; plots bound traces.
+    """
     print("[BENCHMARK] Running with naive bound...")
     solver_naive = BnBSolver(graph, costs, log=log, use_tight_bound=False)
     start_naive = time.time()
@@ -497,6 +495,7 @@ def benchmark_solver(graph: nx.Graph, costs: CostMap, log: bool = False):
 
 
 class BnBSolver:
+    """Thin wrapper for a single run of the BnB with a chosen upper bound."""
     def __init__(self, graph: nx.Graph, costs: CostMap, log: bool = True, use_tight_bound: bool = True):
         self.graph = graph
         self.costs = costs
@@ -505,18 +504,19 @@ class BnBSolver:
 
     def solve(self):
         if self.log:
-            print(f"graph for bnb solver:")
+            print("graph for bnb solver:")
+        # Normalize edge keys (u < v)
         normalized_costs: CostMap = {}
         for (u, v), w in self.costs.items():
             key = (min(u, v), max(u, v))
             normalized_costs[key] = w
             if self.log:
                 print(f"{key}: {w:.2f}")
+
         cut_edges: CutMap = {e: -1 for e in normalized_costs}
         best: Best = {'obj': 0.0, 'cut': cut_edges, 'count': 0, 'path': ["Start"]}
 
         node_counter = {'count': 0}
-
         start = time.time()
         bnb_multicut(
             self.graph,
@@ -533,16 +533,17 @@ class BnBSolver:
         end = time.time()
 
         if self.log:
-            print("Cut edges:")
             print(f"[FINISH] total time = {end - start:.2f} seconds")
             print(f"[STATS] Total nodes visited in BnB: {node_counter['count']}")
             print(f"[BEST PATH] {' -> '.join(best.get('path', []))}")
+
+        # Recompute objective from incumbent labels (safety)
         obj = 0.0
         for u, v in self.graph.edges():
             e = (min(u, v), max(u, v))
             if best['cut'].get(e, -1) == 1:
-                cost = normalized_costs.get(e, 0.0)
-                obj += cost
+                obj += normalized_costs.get(e, 0.0)
+
         if self.log:
             print("[DEBUG] Final raw best cut:", best['cut'])
         return best['cut'], obj, best['count']
