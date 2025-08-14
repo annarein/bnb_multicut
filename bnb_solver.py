@@ -2,17 +2,31 @@ import networkx as nx
 from collections import deque
 import matplotlib.pyplot as plt
 import time
+from typing import Dict, Tuple, List, Optional, TypedDict
+
+# ---------- Type aliases ----------
+Edge = Tuple[int, int]
+CostMap = Dict[Edge, float]
+CutMap = Dict[Edge, int]
+
+class Best(TypedDict):
+    obj: float
+    cut: CutMap
+    count: int
 
 
-def contract_and_merge_costs(graph: nx.Graph, costs: dict, a, b, cut_edges: dict, log=False):
-    # if not graph.has_node(a) or not graph.has_node(b):  # why it's necessary now? I forgot why I wrote this
-    #     return None, None, None
+def contract_and_merge_costs(
+    graph: nx.Graph,
+    costs: CostMap,
+    a: int,
+    b: int,
+    cut_edges: CutMap,
+    log: bool = False
+) -> Tuple[nx.Graph, CostMap, CutMap]:
     assert graph.has_node(a) and graph.has_node(b), \
         f"Edge ({a},{b}) not consistent with current graph."
 
-    # Step 1: prepare new cut_edges
     new_cut_edges = cut_edges.copy()
-
     neighbors = set(graph.neighbors(a)).union(graph.neighbors(b))
     neighbors.discard(a)
     neighbors.discard(b)
@@ -24,10 +38,8 @@ def contract_and_merge_costs(graph: nx.Graph, costs: dict, a, b, cut_edges: dict
         if cut_bc == 1:
             new_cut_edges[key_ac] = 1
 
-    # Step 2: prepare new_costs BEFORE merge
-    new_costs = {}
+    new_costs: CostMap = {}
     touched = set()
-
     for c in neighbors:
         key_ac = (min(a, c), max(a, c))
         key_bc = (min(b, c), max(b, c))
@@ -36,29 +48,22 @@ def contract_and_merge_costs(graph: nx.Graph, costs: dict, a, b, cut_edges: dict
         new_costs[key_ac] = cost_a + cost_b
         touched.add(key_ac)
 
-    # keep other costs unchanged
     for (u, v), w in costs.items():
         key = (min(u, v), max(u, v))
         if key not in touched and b not in key:
             new_costs[key] = w
 
-    # Step 3: merge
     new_graph = nx.contracted_nodes(graph, a, b, self_loops=False)
-
     return new_graph, new_costs, new_cut_edges
 
 
-def propagate_zero_labels(cut_edges, u, v, costs, log=False):
-    """
-    Propagates 0-labels (uncut) within the same connected component starting from (u, v).
-
-    Any undecided edge (value -1) between any two nodes in the same 0-connected component
-    will be set to 0, and its cost will be included in the returned delta objective.
-
-    Returns:
-        updated cut_edges dict,
-        total cost added from newly labeled 0-edges.
-    """
+def propagate_zero_labels(
+    cut_edges: CutMap,
+    u: int,
+    v: int,
+    costs: CostMap,
+    log: bool = False
+) -> CutMap:
     if log:
         print(f"[PROP_ZERO] Start propagate_zero_labels from edge ({u}, {v})")
         print("  - Current cut_edges, costs:")
@@ -67,15 +72,13 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
             cost_str = f",  cost: {costs[edge]:.2f}" if edge in costs else ""
             print(f"    {edge}: {label}{cost_str}")
 
-    # Step 1: Build adjacency map of all edges labeled as uncut (0)
-    uncut_adj = {}
+    uncut_adj: Dict[int, set] = {}
     for (a, b), val in cut_edges.items():
         if val == 0:
             uncut_adj.setdefault(a, set()).add(b)
             uncut_adj.setdefault(b, set()).add(a)
 
-    # Step 2: BFS to find all nodes reachable via uncut edges
-    visited = set()
+    visited: set = set()
     queue = deque([u, v])
     while queue:
         node = queue.popleft()
@@ -86,51 +89,44 @@ def propagate_zero_labels(cut_edges, u, v, costs, log=False):
             if neighbor not in visited:
                 queue.append(neighbor)
 
-    # Step 3: For each pair of visited nodes, propagate 0-label if edge was undecided
-    visited = list(visited)
-    for i in range(len(visited)):
-        for j in range(i + 1, len(visited)):
-            n1, n2 = visited[i], visited[j]
+    visited_list = list(visited)
+    for i in range(len(visited_list)):
+        for j in range(i + 1, len(visited_list)):
+            n1, n2 = visited_list[i], visited_list[j]
             edge = (min(n1, n2), max(n1, n2))
             if edge in cut_edges and cut_edges[edge] == -1:
                 cut_edges[edge] = 0
                 if log:
-                    found = "FOUND" if edge in costs else "NOT FOUND"  # only have NOT FOUND result, maybe it's not necessary?
+                    found = "FOUND" if edge in costs else "NOT FOUND"
                     value = costs.get(edge, 0)
                     print(f"\033[96m  Propagate 0-label: edge {edge} with cost {value:.2f} ({found})\033[0m")
     return cut_edges
 
 
-def is_feasible_cut(graph: nx.Graph, cut_edges: dict, verbose=False) -> bool:
-    # 1. 仅处理原始图中的边
+def is_feasible_cut(graph: nx.Graph, cut_edges: CutMap, verbose: bool = False) -> bool:
     edges_to_cut = []
     for u, v in graph.edges:
         if cut_edges.get((u, v), 0) == 1 or cut_edges.get((v, u), 0) == 1:
             edges_to_cut.append((u, v))
 
-    # 2. 拷贝图，删掉这些边
     g_copy = graph.copy()
     g_copy.remove_edges_from(edges_to_cut)
 
-    # 3. 构造每个节点的连通分量编号
     components = list(nx.connected_components(g_copy))
-    label = {}
+    label: Dict[int, int] = {}
     for idx, comp in enumerate(components):
         for node in comp:
             label[node] = idx
 
-    # 4. 验证所有 cut=1 的边是否真的跨分量
     for u, v in edges_to_cut:
         if label[u] == label[v]:
             if verbose:
                 print(f"Edge ({u}, {v}) is cut but endpoints are still in same component.")
             return False
-
-    # 5. 所有 cut 边都成功断开
     return True
 
 
-def print_edge_labels_inline(graph, cut_edges, obj, best_obj):
+def print_edge_labels_inline(graph: nx.Graph, cut_edges: CutMap, obj: float, best_obj: float) -> None:
     RED = "\033[91m"
     GREEN = "\033[92m"
     RESET = "\033[0m"
@@ -140,19 +136,22 @@ def print_edge_labels_inline(graph, cut_edges, obj, best_obj):
     for u, v in graph.edges():
         e = (min(u, v), max(u, v))
         label = cut_edges.get(e, -1)
-        # if e not in cut_edges:
-        #     raise ValueError(f"Edge {e} not found in cut_edges!")
-        # label = cut_edges[e]
         if label == 1:
             parts.append(f"{RED}{e}{RESET}")
         elif label == 0:
             parts.append(f"{GREEN}{e}{RESET}")
         else:
-            parts.append(f"{e}")  # undecided = default color
+            parts.append(f"{e}")
     print("  Edges: " + "  ".join(parts))
 
 
-def update_best_if_feasible_final(orig_graph, cut_edges, obj, best, log=False):
+def update_best_if_feasible_final(
+    orig_graph: nx.Graph,
+    cut_edges: CutMap,
+    obj: float,
+    best: Best,
+    log: bool = False
+) -> None:
     if is_feasible_cut(orig_graph, cut_edges):
         if obj > best['obj']:
             best['obj'] = obj
@@ -162,13 +161,9 @@ def update_best_if_feasible_final(orig_graph, cut_edges, obj, best, log=False):
                 print(f"[UPDATE] New best obj = {obj:.2f}")
                 print_edge_labels_inline(orig_graph, cut_edges, obj, best['obj'])
         elif obj == best['obj']:
-            best['cut'] = cut_edges  # 这是唯一的不一样，
-            # 如果是obj最好， cut_edges 还是替换一下，为啥要换啊，
-            # 因为如果之前存的临时的，可能所有边还没处理完？
-            # 虽然 没处理完，但是obj肯定会越来越大，因为是正的，为啥要算作best呢
+            best['cut'] = cut_edges
             best['count'] += 1
             if log:
-                # 构造 clusters
                 g_copy = orig_graph.copy()
                 edges_to_cut = [(u, v) for (u, v), val in cut_edges.items() if val == 1]
                 g_copy.remove_edges_from(edges_to_cut)
@@ -176,21 +171,24 @@ def update_best_if_feasible_final(orig_graph, cut_edges, obj, best, log=False):
                 clusters_str = ' '.join(
                     '{' + ','.join(str(node) for node in sorted(comp)) + '}' for comp in clusters
                 )
-
-                # 打印
-                print(
-                    f"[TIE] Another feasible cut with obj = {obj:.2f}, Clusters: {clusters_str}, total count = {best['count']}")
-
-bound_trace = []  # (depth, tighter_bound, naive_bound)
+                print(f"[TIE] Another feasible cut with obj = {obj:.2f}, Clusters: {clusters_str}, total count = {best['count']}")
 
 
-def compute_tight_upper_bound(graph: nx.Graph, costs: dict, cut_edges: dict, max_cycle_length: int = 6) -> float:
+bound_trace: List[Tuple[int, float, float]] = []
+
+
+def compute_tight_upper_bound(
+    graph: nx.Graph,
+    costs: CostMap,
+    cut_edges: CutMap,
+    max_cycle_length: int = 6
+) -> float:
     graph_edges = set(graph.edges())
     E_plus = {e for e, w in costs.items() if w > 0 and e in graph_edges and cut_edges.get(e, -1) != 1}
     E_minus = {e for e, w in costs.items() if w < 0 and e in graph_edges and cut_edges.get(e, -1) != 1}
     G_plus = graph.edge_subgraph(E_plus).copy()
 
-    conflicted_cycles = []
+    conflicted_cycles: List[List[Edge]] = []
     for (u, v) in E_minus:
         if u not in G_plus or v not in G_plus:
             continue
@@ -205,7 +203,7 @@ def compute_tight_upper_bound(graph: nx.Graph, costs: dict, cut_edges: dict, max
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             continue
 
-    used_edges = set()
+    used_edges: set = set()
     reduce_total = 0
     for cycle in sorted(conflicted_cycles, key=lambda cyc: len(cyc)):
         if any(e in used_edges or cut_edges.get(e, -1) == 1 or e not in graph_edges for e in cycle):
@@ -221,7 +219,7 @@ def compute_tight_upper_bound(graph: nx.Graph, costs: dict, cut_edges: dict, max
     return naive_upper_bound - reduce_total
 
 
-def plot_bound_trace():
+def plot_bound_trace() -> None:
     if not bound_trace:
         print("[WARN] No bound trace to plot.")
         return
@@ -236,19 +234,16 @@ def plot_bound_trace():
     plt.grid(True)
     plt.tight_layout()
     plt.show()
-    # 🔧 Clear after plotting
     bound_trace.clear()
 
 
-def print_edge_label_groups(cut_edges: dict, tag: str = ""):
+def print_edge_label_groups(cut_edges: CutMap, tag: str = "") -> None:
     RED = "\033[91m"
     GREEN = "\033[92m"
     RESET = "\033[0m"
-
     cut = {e for e, v in cut_edges.items() if v == 1}
     uncut = {e for e, v in cut_edges.items() if v == 0}
     undecided = {e for e, v in cut_edges.items() if v == -1}
-
     print(f"[EDGE LABELS{f' @ {tag}' if tag else ''}]")
     print(f"  cut edges:      {RED}{cut}{RESET}")
     print(f"  uncut edges:    {GREEN}{uncut}{RESET}")
@@ -256,16 +251,17 @@ def print_edge_label_groups(cut_edges: dict, tag: str = ""):
 
 
 def bnb_multicut(
-        graph: nx.Graph,
-        costs: dict,
-        cut_edges: dict,
-        obj: float,
-        best: dict,
-        log: bool,
-        use_tight_bound: bool = True,
-        depth: int = 0,
-        node_counter=None,
-        orig_graph=None):
+    graph: nx.Graph,
+    costs: CostMap,
+    cut_edges: CutMap,
+    obj: float,
+    best: Best,
+    log: bool,
+    use_tight_bound: bool = True,
+    depth: int = 0,
+    node_counter: Optional[Dict[str, int]] = None,
+    orig_graph: Optional[nx.Graph] = None
+) -> None:
 
     if node_counter is not None:
         node_counter['count'] += 1  # 🔢 每次进入一个分支节点就 +1
