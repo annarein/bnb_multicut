@@ -2,7 +2,7 @@ from bnb_solver import BnBSolver
 from ilp_solver import ILPSolver
 from graph_generators import get_random_costs_graph
 
-def run_benchmark(num_instances=300, shape=(5, 3), tolerance=1e-6):
+def run_benchmark(num_instances=1000, shape=(5, 3), tolerance=1e-6):
     for seed in range(num_instances):
         graph, costs, _ = get_random_costs_graph(seed=seed, shape=shape)
         ilp = ILPSolver(graph.copy(), costs)
