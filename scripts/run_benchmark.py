@@ -267,9 +267,9 @@ if __name__ == "__main__":
         (5, 3),   # 15 nodes
         (8, 4),   # 32 nodes
         (10, 5),  # 50 nodes
-        (12, 6),  # 72 nodes
-        (14, 7),  # 98 nodes
         # Add more if needed:
+        # (12, 6),  # 72 nodes
+        # (14, 7),  # 98 nodes
         # (16, 8), (18, 9), (20, 10),
     ]
 
